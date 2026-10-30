@@ -8,7 +8,7 @@ file_schema = openapi.Schema(
     properties={
         "path": openapi.Schema(type=openapi.TYPE_STRING),
         "type": openapi.Schema(
-            type=openapi.TYPE_STRING, enum=["STORY", "QUESTIONS", "RESOURCES"]
+            type=openapi.TYPE_STRING, enum=["STORY", "QUESTIONS", "RESOURCES", "MEDIA"]
         ),
         "sha256": openapi.Schema(type=openapi.TYPE_STRING),
         "bytes": openapi.Schema(type=openapi.TYPE_INTEGER),

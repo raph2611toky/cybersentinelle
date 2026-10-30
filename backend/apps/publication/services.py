@@ -6,6 +6,7 @@ import os
 import re
 import shutil
 import tempfile
+from django.urls import reverse
 from pathlib import Path
 from django.conf import settings
 from django.core.exceptions import ValidationError
@@ -107,6 +108,34 @@ def decorate_story_urls(data, manifest, request):
         v = node.get("visual")
         if v and v in assets:
             node["visual_url"] = media_url(assets[v], request)
+    # Ne jamais exposer un chemin privé dans une réponse publique.
+    for node in data.get("nodes", {}).values():
+        for lang_data in node.get("media", {}).values():
+            target = lang_data.pop("video_path", None)
+            if target and target.startswith('media/') and target.endswith('.mp4'):
+                asset_id = target.split('/')[-1].removesuffix('.mp4')
+                from uuid import UUID
+                try:
+                    asset_id = UUID(asset_id)
+                except ValueError:
+                    continue
+                lang_data['video_url'] = request.build_absolute_uri(reverse('story-media', kwargs={
+                    'version': manifest['version'], 'asset_id': asset_id,
+                }))
+            subtitle_path = lang_data.pop('subtitle_path', None)
+            if subtitle_path and subtitle_path.startswith('subtitles/'):
+                from pathlib import Path
+                from uuid import UUID
+                stem = Path(subtitle_path).stem
+                ext = Path(subtitle_path).suffix.lstrip('.')
+                if ext in {'srt', 'vtt'}:
+                    try:
+                        subtitle_id = UUID(stem)
+                    except ValueError:
+                        continue
+                    lang_data['subtitle_url'] = request.build_absolute_uri(reverse('story-subtitle', kwargs={
+                        'version': manifest['version'], 'asset_id': subtitle_id, 'ext': ext,
+                    }))
     return data
 
 
@@ -168,7 +197,34 @@ def publication_payload():
             for option in node.options.all():
                 option.full_clean()
         validate_story_graph(story)
-        result[f"stories/{story.slug}.json"] = story_dict(story, None, True)
+        story_data = story_dict(story, None, True)
+        # Les fichiers ne sont rendus publics qu'après publication d'une copie figée.
+        from apps.media_studio.models import SceneMedia, MediaAsset
+        scene_media = SceneMedia.objects.filter(noeud__tantara=story).select_related(
+            'noeud', 'langue', 'video_finale', 'video', 'audio'
+        )
+        for scene in scene_media:
+            if scene.mode == SceneMedia.Mode.TEXT_ONLY:
+                info = {'mode': 'text'}
+            else:
+                if scene.statut != SceneMedia.Status.READY or not scene.video_finale_id:
+                    raise ValidationError(f'{story.slug}:{scene.noeud.cle}/{scene.langue.code}: rendu vidéo absent')
+                media_asset = scene.video_finale
+                if media_asset.type != MediaAsset.Kind.VIDEO or not media_asset.droits_confirmes:
+                    raise ValidationError(f'{story.slug}:{scene.noeud.cle}: média non validé')
+                if not media_asset.fichier or not media_asset.fichier.storage.exists(media_asset.fichier.name):
+                    raise ValidationError(f'{story.slug}:{scene.noeud.cle}: clip introuvable')
+                info = {'mode': 'video', 'video_path': f'media/{media_asset.pk}.mp4'}
+            if scene.sous_titres_id:
+                subtitle = scene.sous_titres
+                if subtitle.type != MediaAsset.Kind.SUBTITLE or not subtitle.droits_confirmes:
+                    raise ValidationError(f'{story.slug}:{scene.noeud.cle}: sous-titres non autorisés')
+                extension = Path(subtitle.fichier.name).suffix.lower()
+                if extension not in {'.vtt', '.srt'}:
+                    raise ValidationError('Format des sous-titres invalide')
+                info['subtitle_path'] = f'subtitles/{subtitle.pk}{extension}'
+            story_data['nodes'][scene.noeud.cle].setdefault('media', {})[scene.langue.code] = info
+        result[f"stories/{story.slug}.json"] = story_data
     for sujet in Sujet.objects.filter(actif=True):
         sujet.full_clean()
     resources = list(
@@ -213,6 +269,30 @@ def publication_payload():
     return result, assets
 
 
+def _studio_media_in_payload(payload):
+    """Mapping {chemin de release: média privé}, après validation des références."""
+    from uuid import UUID
+    from apps.media_studio.models import MediaAsset
+    paths = {}
+    for name, story in payload.items():
+        if not name.startswith('stories/'):
+            continue
+        for node in story.get('nodes', {}).values():
+            for lang_data in node.get('media', {}).values():
+                for key, prefix in (('video_path', 'media/'), ('subtitle_path', 'subtitles/')):
+                    target = lang_data.get(key)
+                    if not target:
+                        continue
+                    if not target.startswith(prefix):
+                        raise ValidationError('Chemin média inconnu')
+                    asset_id = UUID(target.rsplit('/', 1)[-1].split('.')[0])
+                    paths[target] = asset_id
+    assets = {a.pk: a for a in MediaAsset.objects.filter(pk__in=set(paths.values()))}
+    if len(assets) != len(set(paths.values())):
+        raise ValidationError('Référence vers un média manquant')
+    return {target: assets[asset_id] for target, asset_id in paths.items()}
+
+
 def publish(numero, journal=""):
     """Génère une release atomique, et bascule la version active en transaction."""
     if not re.fullmatch(r"[a-zA-Z0-9][a-zA-Z0-9._-]{0,39}", numero):
@@ -247,6 +327,19 @@ def publish(numero, journal=""):
                     "language": None,
                 }
             )
+        # Les clips privés sont copiés dans le snapshot ; jamais un lien direct au brouillon.
+        for relative, media_asset in sorted(_studio_media_in_payload(payload).items()):
+            target = staging / relative
+            target.parent.mkdir(parents=True, exist_ok=True)
+            digest = hashlib.sha256()
+            with media_asset.fichier.open('rb') as source, target.open('wb') as destination:
+                for chunk in iter(lambda: source.read(1024 * 1024), b''):
+                    digest.update(chunk)
+                    destination.write(chunk)
+            if digest.hexdigest() != media_asset.sha256:
+                raise ValidationError(f'Intégrité du média invalide : {relative}')
+            entries.append({'path': relative, 'type': 'MEDIA', 'sha256': digest.hexdigest(),
+                            'bytes': target.stat().st_size, 'language': None})
         canonical = "\n".join(
             f"{e['path']}:{e['sha256']}"
             for e in sorted(entries, key=lambda e: e["path"])

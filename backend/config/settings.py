@@ -37,6 +37,7 @@ INSTALLED_APPS = [
     "apps.resources.apps.ResourcesConfig",
     "apps.pedagogie.apps.PedagogieConfig",
     "apps.publication.apps.PublicationConfig",
+    "apps.media_studio.apps.MediaStudioConfig",
 ]
 MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",
@@ -208,3 +209,24 @@ AUTH_PASSWORD_VALIDATORS = [
 SWAGGER_USE_COMPAT_RENDERERS = False
 
 FORMS_URLFIELD_ASSUME_HTTPS = True
+
+
+# Studio média - fichiers bruts uniquement dans un emplacement PRIVÉ, jamais exposé par /media/.
+STUDIO_PRIVATE_ROOT = Path(os.getenv('STUDIO_PRIVATE_ROOT', str(BASE_DIR / 'private_media'))).resolve()
+if STUDIO_PRIVATE_ROOT.is_relative_to(MEDIA_ROOT):
+    raise RuntimeError('STUDIO_PRIVATE_ROOT doit être distinct de MEDIA_ROOT exposé en développement')
+STUDIO_MAX_UPLOAD_BYTES = int(os.getenv('STUDIO_MAX_UPLOAD_MB', '120')) * 1024 * 1024
+STUDIO_MAX_MEDIA_SECONDS = int(os.getenv('STUDIO_MAX_MEDIA_SECONDS', '240'))
+STUDIO_MAX_OUTPUT_BYTES = 150 * 1024 * 1024
+STUDIO_MAX_TTS_RESULT_BYTES = 20 * 1024 * 1024
+STUDIO_MAX_TTS_CHARS = min(int(os.getenv('STUDIO_MAX_TTS_CHARS', '1200')), 2500)
+STUDIO_TTS_DAILY_LIMIT = min(int(os.getenv('STUDIO_TTS_DAILY_LIMIT', '12')), 100)
+STUDIO_TTS_PROVIDERS = {x.strip().upper() for x in os.getenv('STUDIO_TTS_PROVIDERS', 'GEMINI,ELEVENLABS').split(',') if x.strip()}
+STUDIO_PROVIDER_TIMEOUT = 65
+STUDIO_RENDER_TIMEOUT = 180
+
+# Une file de travail est nécessaire pour ne pas bloquer le serveur HTTP.
+CELERY_BROKER_URL = os.getenv('CELERY_BROKER_URL', 'redis://127.0.0.1:6379/0')
+CELERY_TASK_IGNORE_RESULT = True
+CELERY_TASK_ACKS_LATE = True
+CELERY_WORKER_PREFETCH_MULTIPLIER = 1

@@ -1,0 +1,30 @@
+from django.urls import path
+from . import views
+
+urlpatterns = [
+    path('media/', views.MediaListAPIView.as_view(), name='studio-media-list'),
+    path('media/upload/', views.MediaUploadAPIView.as_view(), name='studio-media-upload'),
+    path('media/<uuid:pk>/', views.MediaDetailAPIView.as_view(), name='studio-media-detail'),
+    path('media/<uuid:pk>/file/', views.MediaFileAPIView.as_view(), name='studio-media-download'),
+    path('media/<uuid:pk>/rights-confirm/', views.MediaRightsConfirmAPIView.as_view(), name='studio-media-rights'),
+    path('media/<uuid:pk>/delete/', views.MediaDeleteAPIView.as_view(), name='studio-media-delete'),
+    path('scenes/', views.SceneListAPIView.as_view(), name='studio-scenes-list'),
+    path('scenes/create/', views.SceneCreateAPIView.as_view(), name='studio-scenes-create'),
+    path('scenes/<uuid:pk>/', views.SceneDetailAPIView.as_view(), name='studio-scenes-detail'),
+    path('scenes/<uuid:pk>/delete/', views.SceneDeleteAPIView.as_view(), name='studio-scenes-delete'),
+    path('scenes/<uuid:pk>/update/', views.ScenePatchAPIView.as_view(), name='studio-scenes-update'),
+    path('scenes/<uuid:pk>/render/', views.RenderCreateAPIView.as_view(), name='studio-scenes-render'),
+    path('scenes/<uuid:pk>/dialogues/', views.DialogueListAPIView.as_view(), name='studio-dialogues-list'),
+    path('dialogues/create/', views.DialogueCreateAPIView.as_view(), name='studio-dialogues-create'),
+    path('dialogues/<uuid:pk>/generate-voice/', views.DialogueTTSCreateAPIView.as_view(), name='studio-dialogue-tts'),
+    path('dialogues/<uuid:pk>/update/', views.DialoguePatchAPIView.as_view(), name='studio-dialogues-update'),
+    path('dialogues/<uuid:pk>/delete/', views.DialogueDeleteAPIView.as_view(), name='studio-dialogues-delete'),
+    path('voices/', views.VoiceListAPIView.as_view(), name='studio-voices-list'),
+    path('voices/<uuid:pk>/', views.VoiceDetailAPIView.as_view(), name='studio-voices-detail'),
+    path('voices/<uuid:pk>/update/', views.VoicePatchAPIView.as_view(), name='studio-voices-update'),
+    path('voices/<uuid:pk>/delete/', views.VoiceDeleteAPIView.as_view(), name='studio-voices-delete'),
+    path('voices/create/', views.VoiceCreateAPIView.as_view(), name='studio-voices-create'),
+    path('voices/generate/', views.TTSCreateAPIView.as_view(), name='studio-tts-create'),
+    path('jobs/', views.JobListAPIView.as_view(), name='studio-jobs-list'),
+    path('jobs/<uuid:pk>/', views.JobDetailAPIView.as_view(), name='studio-jobs-detail'),
+]

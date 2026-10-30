@@ -53,3 +53,4 @@ class TypeFichierContenu(models.TextChoices):
     STORY = "STORY", "Histoire"
     QUESTIONS = "QUESTIONS", "Questions"
     RESOURCES = "RESOURCES", "Ressources"
+    MEDIA = "MEDIA", "Média audiovisuel public"

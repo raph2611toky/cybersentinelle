@@ -18,10 +18,12 @@ urlpatterns = [
     path("admin/", admin.site.urls),
     path("api/health/", HealthCheckAPIView.as_view(), name="healthcheck"),
     path("api/editor/", include("apps.editor.urls")),
+    path("api/editor/studio/", include("apps.media_studio.urls")),
     path("api/v1/", include("apps.content_api.urls")),
     path("api/v1/", include("apps.resources.urls")),
     path("api/v1/", include("apps.pedagogie.urls")),
     path("api/v1/", include("apps.publication.urls")),
+    path("api/v1/", include("apps.media_studio.public_urls")),
 ]
 
 if settings.SWAGGER_ENABLED:

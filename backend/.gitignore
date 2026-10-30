@@ -9,3 +9,5 @@ media/*
 !media/.gitkeep
 content/releases/*
 !content/releases/.gitkeep
+
+/private_media/

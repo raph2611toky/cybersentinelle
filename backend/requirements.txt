@@ -8,3 +8,7 @@ whitenoise>=6.9,<7.0
 pytest>=8.3,<10.0
 pytest-django>=4.10,<5.0
 Pillow>=11,<13
+
+# Studio media : traitements en file, images inspectées avec Pillow déjà installé.
+celery>=5.4,<6
+redis>=5,<7
