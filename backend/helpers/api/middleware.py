@@ -35,7 +35,7 @@ class PrivacyHeadersMiddleware:
 
     def __call__(self, request):
         response = self.get_response(request)
-        response["Referrer-Policy"] = "no-referrer"
+        response["Referrer-Policy"] = "same-origin"
         response["Permissions-Policy"] = "microphone=(), geolocation=(), camera=()"
         if request.path.startswith(
             (

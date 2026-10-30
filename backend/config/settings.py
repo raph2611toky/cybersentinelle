@@ -159,7 +159,7 @@ SECURE_HSTS_SECONDS = 0 if DEBUG else 31536000
 SECURE_HSTS_INCLUDE_SUBDOMAINS = not DEBUG
 SECURE_HSTS_PRELOAD = False
 SECURE_CONTENT_TYPE_NOSNIFF = True
-SECURE_REFERRER_POLICY = "no-referrer"
+SECURE_REFERRER_POLICY = "same-origin"
 X_FRAME_OPTIONS = "DENY"
 # N'activer cet en-tête que derrière un reverse-proxy de confiance correctement configuré.
 if not DEBUG and os.getenv("TRUST_PROXY_SSL_HEADER", "false").lower() == "true":
