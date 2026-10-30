@@ -22,7 +22,8 @@ export default function App() {
   return <Routes>
     <Route path="/login" element={<Login />} />
     <Route element={<RequireAuth><Shell /></RequireAuth>}>
-      <Route index element={<Overview />} />
+      <Route index element={<Navigate to="/dashboard" replace />} />
+      <Route path="dashboard" element={<Overview />} />
       <Route path="tantara" element={<Tantara />} />
       <Route path="arbre" element={<StoryTree />} />
       <Route path="medias" element={<Media />} />
@@ -30,7 +31,7 @@ export default function App() {
       <Route path="ressources" element={<Resources />} />
       <Route path="publication" element={<Publication />} />
       <Route path="parametres" element={<SettingsPage />} />
-      <Route path="*" element={<Navigate to="/" replace />} />
+      <Route path="*" element={<Navigate to="/dashboard" replace />} />
     </Route>
   </Routes>;
 }

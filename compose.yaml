@@ -1,0 +1,91 @@
+# Local/self-hosted example. Jenkins uses an existing MySQL service described in
+# its backend.env, and deploys backend/dashboard/Redis/worker via docker run.
+name: safidiko
+services:
+  mysql:
+    image: mysql:8.4
+    restart: unless-stopped
+    environment:
+      MYSQL_DATABASE: ${MYSQL_NAME:?set MYSQL_NAME in root .env}
+      MYSQL_USER: ${MYSQL_USER:?set MYSQL_USER in root .env}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:?set MYSQL_PASSWORD in root .env}
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?set MYSQL_ROOT_PASSWORD in root .env}
+    command: ["--character-set-server=utf8mb4", "--collation-server=utf8mb4_unicode_ci"]
+    volumes:
+      - mysql_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD-SHELL", "MYSQL_PWD=\"$${MYSQL_ROOT_PASSWORD}\" mysqladmin ping -h 127.0.0.1 -u root --silent"]
+      interval: 10s
+      retries: 15
+      timeout: 5s
+    networks: [safidiko]
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis_data:/data
+    networks:
+      safidiko:
+        aliases: [safidiko-redis]
+
+  backend:
+    build: ./backend
+    restart: unless-stopped
+    env_file:
+      - ./backend/.env
+    depends_on:
+      mysql: {condition: service_healthy}
+      redis: {condition: service_started}
+    ports:
+      - "127.0.0.1:8465:8000"
+    volumes:
+      - public_media:/app/media
+      - private_media:/app/private_media
+      - releases:/app/content/releases
+      - django_static:/app/staticfiles
+    # Launch with `docker compose run --rm backend python manage.py migrate --noinput` first.
+    networks:
+      safidiko:
+        aliases: [safidiko-backend]
+
+  worker:
+    build: ./backend
+    restart: unless-stopped
+    command: ["celery", "-A", "config", "worker", "--loglevel=info", "-Q", "translation,celery"]
+    env_file:
+      - ./backend/.env
+    depends_on:
+      mysql: {condition: service_healthy}
+      redis: {condition: service_started}
+    volumes:
+      - public_media:/app/media
+      - private_media:/app/private_media
+      - releases:/app/content/releases
+    networks: [safidiko]
+
+  dashboard:
+    build:
+      context: ./dashboard
+      args:
+        VITE_API_BASE_URL: /api
+    restart: unless-stopped
+    depends_on: [backend]
+    ports:
+      - "127.0.0.1:${DASHBOARD_PORT:-8080}:80"
+    volumes:
+      - public_media:/srv/safidiko/media:ro
+      - django_static:/srv/safidiko/static:ro
+    networks: [safidiko]
+
+volumes:
+  mysql_data:
+  redis_data:
+  public_media:
+  private_media:
+  releases:
+  django_static:
+networks:
+  safidiko:
+    driver: bridge

@@ -13,7 +13,7 @@ export default function Login() {
   const [submitError,setSubmitError] = useState('');
   const [submitting,setSubmitting] = useState(false);
 
-  const to = location.state?.from?.pathname || '/';
+  const to = location.state?.from?.pathname || '/dashboard';
   useEffect(() => { if (auth.authed) navigate(to, { replace: true }); }, [auth.authed]);
 
   const submit = async e => {

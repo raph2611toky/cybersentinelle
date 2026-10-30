@@ -4,7 +4,7 @@ import { useState } from 'react';
 import { useAdmin } from '../lib/store';
 
 const nav = [
-  { to: '/', label: 'Vue d’ensemble', icon: LayoutDashboard, end: true },
+  { to: '/dashboard', label: 'Vue d’ensemble', icon: LayoutDashboard, end: true },
   { to: '/tantara', label: 'Tantara', icon: BookOpen },
   { to: '/arbre', label: 'Arbres narratifs', icon: GitBranch },
   { to: '/medias', label: 'Médiathèque', icon: Film },
@@ -15,7 +15,7 @@ const nav = [
 ];
 
 const titles = {
-  '/': ['Vue d’ensemble', 'Gérez vos histoires, vos médias et les publications.'],
+  '/dashboard': ['Vue d’ensemble', 'Gérez vos histoires, vos médias et les publications.'],
   '/tantara': ['Tantara', 'Création et gestion des récits interactifs.'],
   '/arbre': ['Arbres narratifs', 'Concevez les scènes et leurs embranchements.'],
   '/medias': ['Médiathèque', 'Images, vidéos et fichiers audio.'],
@@ -33,7 +33,7 @@ export default function Shell() {
   const location = useLocation();
   const navigate = useNavigate();
   const { auth, logout, error, setError } = useAdmin();
-  const [title, desc] = titles[location.pathname] || titles['/'];
+  const [title, desc] = titles[location.pathname] || titles['/dashboard'];
 
   const userName = auth.user?.name || 'Administrateur';
   const userRole = auth.user?.role || 'Studio SAFIDIKO';

@@ -70,14 +70,19 @@ TEMPLATES = [
 ]
 WSGI_APPLICATION = "config.wsgi.application"
 ASGI_APPLICATION = "config.asgi.application"
-if DEBUG:
+# SQLite remains the default for local non-Docker development.
+# Set DB_ENGINE=mysql to use mysqlclient locally without switching DEBUG off.
+DB_ENGINE = os.getenv("DB_ENGINE", "sqlite" if DEBUG else "mysql").lower()
+if DB_ENGINE == "sqlite":
+    if not DEBUG:
+        raise RuntimeError("SQLite est interdit lorsque DEBUG=false")
     DATABASES = {
         "default": {
             "ENGINE": "django.db.backends.sqlite3",
             "NAME": BASE_DIR / "db.sqlite3",
         }
     }
-else:
+elif DB_ENGINE == "mysql":
     required = ["MYSQL_NAME", "MYSQL_USER", "MYSQL_PASSWORD", "MYSQL_HOST"]
     missing = [k for k in required if not os.getenv(k)]
     if missing:
@@ -97,6 +102,8 @@ else:
             "CONN_MAX_AGE": 60,
         }
     }
+else:
+    raise RuntimeError("DB_ENGINE doit être sqlite ou mysql")
 LANGUAGE_CODE = "fr-fr"
 TIME_ZONE = "Indian/Antananarivo"
 USE_I18N = True
