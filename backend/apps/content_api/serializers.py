@@ -108,6 +108,21 @@ class SujetEditorSerializer(ValidatedModelSerializer):
 
 
 class VisuelEditorSerializer(ValidatedModelSerializer):
+    fichier_url = serializers.SerializerMethodField()
+    chemin_asset_url = serializers.SerializerMethodField()
+
+    def get_fichier_url(self, obj):
+        request = self.context.get("request")
+        if not obj.fichier:
+            return None
+        url = obj.fichier.url
+        return request.build_absolute_uri(url) if request else url
+
+    def get_chemin_asset_url(self, obj):
+        if not obj.chemin_asset:
+            return None
+        return media_url(obj.chemin_asset, self.context.get("request"))
+
     def validate_fichier(self, value):
         from helpers.helper import normalize_image
         from django.core.exceptions import ValidationError
@@ -137,7 +152,9 @@ class VisuelEditorSerializer(ValidatedModelSerializer):
             "code",
             "type",
             "fichier",
+            "fichier_url",
             "chemin_asset",
+            "chemin_asset_url",
             "format",
             "largeur_px",
             "hauteur_px",
@@ -150,10 +167,15 @@ class VisuelEditorSerializer(ValidatedModelSerializer):
             "sha256",
             "actif",
         )
-        read_only_fields = ("id", "created_at", "updated_at")
+        read_only_fields = ("id", "created_at", "updated_at", "fichier_url", "chemin_asset_url")
 
 
 class TantaraEditorSerializer(ValidatedModelSerializer):
+    visuel_heros_url = serializers.SerializerMethodField()
+
+    def get_visuel_heros_url(self, obj):
+        return absolute_static_url(self.context.get('request'), obj.visuel_heros) if self.context.get('request') else None
+
     visuel_heros_detail = RelationSummarySerializer(
         source="visuel_heros", read_only=True, allow_null=True
     )
@@ -195,6 +217,7 @@ class TantaraEditorSerializer(ValidatedModelSerializer):
             "visuel_heros",
             "sujets",
             "ordre",
+            "visuel_heros_url",
             "visuel_heros_detail",
             "sujets_details",
         )
@@ -202,6 +225,11 @@ class TantaraEditorSerializer(ValidatedModelSerializer):
 
 
 class NoeudEditorSerializer(ValidatedModelSerializer):
+    visuel_url = serializers.SerializerMethodField()
+
+    def get_visuel_url(self, obj):
+        return absolute_static_url(self.context.get('request'), obj.visuel) if self.context.get('request') else None
+
     tantara_detail = RelationSummarySerializer(
         source="tantara", read_only=True, allow_null=True
     )
@@ -231,6 +259,7 @@ class NoeudEditorSerializer(ValidatedModelSerializer):
             "noeud_suivant",
             "ordre",
             "tantara_detail",
+            "visuel_url",
             "visuel_detail",
             "noeud_suivant_detail",
         )

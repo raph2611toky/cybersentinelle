@@ -123,7 +123,6 @@ REST_FRAMEWORK = {
     "PAGE_SIZE": 25,
     "DEFAULT_PERMISSION_CLASSES": ["rest_framework.permissions.IsAuthenticated"],
     "EXCEPTION_HANDLER": "config.exceptions.json_exception_handler",
-    "DEFAULT_THROTTLE_RATES": {"session": "30/hour"},
 }
 CORS_ALLOWED_ORIGINS = [
     x.strip()
@@ -133,8 +132,8 @@ CORS_ALLOWED_ORIGINS = [
     ).split(",")
     if x.strip()
 ]
-CORS_ALLOW_CREDENTIALS = True
-CORS_ALLOW_METHODS = ["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"]
+CORS_ALLOW_CREDENTIALS = False
+CORS_ALLOW_METHODS = ["GET", "HEAD", "OPTIONS"]
 CORS_ALLOW_HEADERS = [
     "accept",
     "content-type",
@@ -149,7 +148,7 @@ SWAGGER_SETTINGS = {
             "type": "apiKey",
             "name": "X-CSRFToken",
             "in": "header",
-            "description": "Valeur du cookie csrftoken, obtenue après GET /api/session/. La connexion staff via /admin/login/ reste nécessaire.",
+            "description": "Cookie csrftoken obtenu via Django Admin (/admin/) ; la connexion staff et les permissions sont requises.",
         }
     },
     "DEFAULT_INFO": "config.swagger.api_info",
@@ -188,7 +187,7 @@ CSRF_COOKIE_SAMESITE = "Lax"
 SESSION_COOKIE_AGE = 86400
 SESSION_EXPIRE_AT_BROWSER_CLOSE = True
 SESSION_SAVE_EVERY_REQUEST = False
-CSRF_TRUSTED_ORIGINS = CORS_ALLOWED_ORIGINS
+CSRF_TRUSTED_ORIGINS = [x.strip() for x in os.getenv("CSRF_TRUSTED_ORIGINS", "").split(",") if x.strip()]
 DATA_UPLOAD_MAX_MEMORY_SIZE = 6 * 1024 * 1024
 FILE_UPLOAD_MAX_MEMORY_SIZE = 1024 * 1024
 AUTH_PASSWORD_VALIDATORS = [

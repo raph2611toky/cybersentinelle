@@ -5,6 +5,9 @@ from rest_framework.exceptions import (
     ValidationError,
     ParseError,
     MethodNotAllowed,
+    UnsupportedMediaType,
+    NotAuthenticated,
+    AuthenticationFailed,
 )
 
 
@@ -16,6 +19,10 @@ def json_exception_handler(exc, context):
         code = "NOT_FOUND"
     elif isinstance(exc, MethodNotAllowed):
         code = "METHOD_NOT_ALLOWED"
+    elif isinstance(exc, UnsupportedMediaType):
+        code = "UNSUPPORTED_MEDIA_TYPE"
+    elif isinstance(exc, (NotAuthenticated, AuthenticationFailed)):
+        code = "UNAUTHENTICATED"
     elif isinstance(exc, (ValidationError, ParseError)):
         code = "BAD_REQUEST"
     elif isinstance(exc, PermissionDenied):
@@ -25,6 +32,8 @@ def json_exception_handler(exc, context):
     # Ne jamais exposer de détails internes ou de données sensibles.
     messages = {
         "NOT_FOUND": "Ressource introuvable",
+        "UNSUPPORTED_MEDIA_TYPE": "Format de requête non pris en charge",
+        "UNAUTHENTICATED": "Authentification requise",
         "METHOD_NOT_ALLOWED": "Méthode interdite",
         "BAD_REQUEST": "Requête invalide",
         "FORBIDDEN": "Accès refusé",

@@ -52,3 +52,11 @@ resources_doc = swagger_auto_schema(
         503: openapi.Response("Aucune release active", ERROR_RESPONSES[500].schema),
     },
 )
+
+# Documentation des vues éditoriales (indépendante de views.py).
+from apps.core.editor_swagger import editor_swagger_docs, visual_form_parameters
+from .serializers import SourceEditorSerializer, RessourceAideEditorSerializer
+
+source_docs = editor_swagger_docs("Source", SourceEditorSerializer)
+
+ressourceaide_docs = editor_swagger_docs("RessourceAide", RessourceAideEditorSerializer)

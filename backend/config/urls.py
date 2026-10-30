@@ -1,7 +1,6 @@
 from django.contrib import admin
 from django.contrib.admin.views.decorators import staff_member_required
 from django.conf.urls.static import static
-from apps.core.views import VisitorSessionView
 from django.conf import settings
 from django.urls import path, include
 from config.swagger import schema_view
@@ -12,7 +11,6 @@ admin.site.index_title = "Contenus et permissions"
 urlpatterns = [
     path("admin/", admin.site.urls),
     path("api/editor/", include("config.editor_urls")),
-    path("api/session/", VisitorSessionView.as_view(), name="visitor-session"),
     path("api/v1/", include("apps.content_api.urls")),
     path("api/v1/", include("apps.resources.urls")),
     path("api/v1/", include("apps.pedagogie.urls")),

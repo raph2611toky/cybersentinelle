@@ -5,7 +5,7 @@ from rest_framework.permissions import AllowAny
 api_info = openapi.Info(
     title="SAFIDIKO — API publique et éditoriale",
     default_version="v1",
-    description="Lecture publique /api/v1/. CRUD staff /api/editor/ avec permissions par modèle. Connexion via /admin/login/. Pour les écritures : cookie sessionid et en-tête X-CSRFToken obtenu via GET /api/session/. Session visiteur sans parcours ni score.",
+    description="Lecture publique /api/v1/. CRUD staff /api/editor/ avec permissions par modèle. Authentification staff via /admin/login/. Pour les écritures : cookie sessionid + X-CSRFToken (cookie csrftoken de Django Admin). Les visiteurs ne disposent d’aucune session applicative.",
 )
 schema_view = get_schema_view(api_info, public=True, permission_classes=(AllowAny,))
 ERROR = openapi.Schema(
@@ -18,11 +18,16 @@ ERROR = openapi.Schema(
             properties={
                 "code": openapi.Schema(type=openapi.TYPE_STRING),
                 "message": openapi.Schema(type=openapi.TYPE_STRING),
+                "fields": openapi.Schema(type=openapi.TYPE_OBJECT, description="Détail des erreurs de champs (tableau de messages ou structure imbriquée selon le serializer)"),
             },
         )
     },
 )
 ERROR_RESPONSES = {
+    401: openapi.Response("Authentification requise", ERROR),
+    403: openapi.Response("Accès refusé", ERROR),
+    409: openapi.Response("Conflit", ERROR),
+    415: openapi.Response("Type de contenu non supporté", ERROR),
     400: openapi.Response("Requête invalide", ERROR),
     404: openapi.Response("Ressource introuvable", ERROR),
     405: openapi.Response("Méthode interdite", ERROR),

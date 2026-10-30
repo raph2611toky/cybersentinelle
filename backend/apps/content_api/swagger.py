@@ -109,3 +109,17 @@ story_detail_doc = swagger_auto_schema(
         503: openapi.Response("Aucune release active", ERROR_RESPONSES[500].schema),
     },
 )
+
+# Documentation des vues éditoriales (indépendante de views.py).
+from apps.core.editor_swagger import editor_swagger_docs, visual_form_parameters
+from .serializers import SujetEditorSerializer, VisuelEditorSerializer, TantaraEditorSerializer, NoeudEditorSerializer, OptionDecisionEditorSerializer
+
+sujet_docs = editor_swagger_docs("Sujet", SujetEditorSerializer)
+
+visuel_docs = editor_swagger_docs("Visuel", VisuelEditorSerializer, multipart=True, manual_parameters=visual_form_parameters())
+
+tantara_docs = editor_swagger_docs("Tantara", TantaraEditorSerializer)
+
+noeud_docs = editor_swagger_docs("Noeud", NoeudEditorSerializer)
+
+optiondecision_docs = editor_swagger_docs("OptionDecision", OptionDecisionEditorSerializer)

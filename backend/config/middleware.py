@@ -15,6 +15,7 @@ class JsonErrorMiddleware:
             403: ("FORBIDDEN", "Accès refusé"),
             404: ("NOT_FOUND", "Ressource introuvable"),
             405: ("METHOD_NOT_ALLOWED", "Méthode interdite"),
+            415: ("UNSUPPORTED_MEDIA_TYPE", "Format de requête non pris en charge"),
             500: ("INTERNAL_ERROR", "Erreur interne du serveur"),
         }
         if response.status_code in labels and not response.get(
@@ -37,7 +38,6 @@ class PrivacyHeadersMiddleware:
         if request.path.startswith(
             (
                 "/api/editor/",
-                "/api/session/",
                 "/api/docs/",
                 "/api/redoc/",
                 "/api/swagger",

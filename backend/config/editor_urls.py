@@ -1,25 +1,127 @@
-from rest_framework.routers import DefaultRouter
-from apps.core.views import LangueViewSet
-from apps.content_api.views import (
-    SujetViewSet,
-    VisuelViewSet,
-    TantaraViewSet,
-    NoeudViewSet,
-    OptionDecisionViewSet,
+"""Routes d'édition explicites : une vue = une seule méthode HTTP."""
+from django.urls import path
+from apps.core.views import (
+    LangueListView,
+    LangueDetailView,
+    LangueCreateView,
+    LangueUpdateView,
+    LanguePartialUpdateView,
+    LangueDeleteView,
 )
-from apps.resources.views import SourceViewSet, RessourceAideViewSet
-from apps.pedagogie.views import QuestionPedagogiqueViewSet
-from apps.publication.views import ReleaseViewSet
+from apps.content_api.editor_views import (
+    SujetListView,
+    SujetDetailView,
+    SujetCreateView,
+    SujetUpdateView,
+    SujetPartialUpdateView,
+    SujetDeleteView,
+    VisuelListView,
+    VisuelDetailView,
+    VisuelCreateView,
+    VisuelUpdateView,
+    VisuelPartialUpdateView,
+    VisuelDeleteView,
+    TantaraListView,
+    TantaraDetailView,
+    TantaraCreateView,
+    TantaraUpdateView,
+    TantaraPartialUpdateView,
+    TantaraDeleteView,
+    NoeudListView,
+    NoeudDetailView,
+    NoeudCreateView,
+    NoeudUpdateView,
+    NoeudPartialUpdateView,
+    NoeudDeleteView,
+    OptionDecisionListView,
+    OptionDecisionDetailView,
+    OptionDecisionCreateView,
+    OptionDecisionUpdateView,
+    OptionDecisionPartialUpdateView,
+    OptionDecisionDeleteView,
+)
+from apps.resources.editor_views import (
+    SourceListView,
+    SourceDetailView,
+    SourceCreateView,
+    SourceUpdateView,
+    SourcePartialUpdateView,
+    SourceDeleteView,
+    RessourceAideListView,
+    RessourceAideDetailView,
+    RessourceAideCreateView,
+    RessourceAideUpdateView,
+    RessourceAidePartialUpdateView,
+    RessourceAideDeleteView,
+)
+from apps.pedagogie.editor_views import (
+    QuestionPedagogiqueListView,
+    QuestionPedagogiqueDetailView,
+    QuestionPedagogiqueCreateView,
+    QuestionPedagogiqueUpdateView,
+    QuestionPedagogiquePartialUpdateView,
+    QuestionPedagogiqueDeleteView,
+)
+from apps.publication.editor_views import (ReleaseListView, ReleaseDetailView, ReleasePublishView, ReleaseRollbackView, ReleaseValidateView)
 
-router = DefaultRouter()
-router.register("languages", LangueViewSet, basename="editor-language")
-router.register("topics", SujetViewSet, basename="editor-topics")
-router.register("visuals", VisuelViewSet, basename="editor-visuals")
-router.register("stories", TantaraViewSet, basename="editor-stories")
-router.register("nodes", NoeudViewSet, basename="editor-nodes")
-router.register("options", OptionDecisionViewSet, basename="editor-options")
-router.register("sources", SourceViewSet, basename="editor-sources")
-router.register("resources", RessourceAideViewSet, basename="editor-resources")
-router.register("questions", QuestionPedagogiqueViewSet, basename="editor-questions")
-router.register("releases", ReleaseViewSet, basename="editor-release")
-urlpatterns = router.urls
+urlpatterns = [
+    path("languages/", LangueListView.as_view(), name="editor-languages-list"),
+    path("languages/create/", LangueCreateView.as_view(), name="editor-languages-create"),
+    path("languages/<uuid:pk>/", LangueDetailView.as_view(), name="editor-languages-retrieve"),
+    path("languages/<uuid:pk>/update/", LangueUpdateView.as_view(), name="editor-languages-update"),
+    path("languages/<uuid:pk>/partial-update/", LanguePartialUpdateView.as_view(), name="editor-languages-partial-update"),
+    path("languages/<uuid:pk>/delete/", LangueDeleteView.as_view(), name="editor-languages-delete"),
+    path("topics/", SujetListView.as_view(), name="editor-topics-list"),
+    path("topics/create/", SujetCreateView.as_view(), name="editor-topics-create"),
+    path("topics/<uuid:pk>/", SujetDetailView.as_view(), name="editor-topics-retrieve"),
+    path("topics/<uuid:pk>/update/", SujetUpdateView.as_view(), name="editor-topics-update"),
+    path("topics/<uuid:pk>/partial-update/", SujetPartialUpdateView.as_view(), name="editor-topics-partial-update"),
+    path("topics/<uuid:pk>/delete/", SujetDeleteView.as_view(), name="editor-topics-delete"),
+    path("visuals/", VisuelListView.as_view(), name="editor-visuals-list"),
+    path("visuals/create/", VisuelCreateView.as_view(), name="editor-visuals-create"),
+    path("visuals/<uuid:pk>/", VisuelDetailView.as_view(), name="editor-visuals-retrieve"),
+    path("visuals/<uuid:pk>/update/", VisuelUpdateView.as_view(), name="editor-visuals-update"),
+    path("visuals/<uuid:pk>/partial-update/", VisuelPartialUpdateView.as_view(), name="editor-visuals-partial-update"),
+    path("visuals/<uuid:pk>/delete/", VisuelDeleteView.as_view(), name="editor-visuals-delete"),
+    path("stories/", TantaraListView.as_view(), name="editor-stories-list"),
+    path("stories/create/", TantaraCreateView.as_view(), name="editor-stories-create"),
+    path("stories/<uuid:pk>/", TantaraDetailView.as_view(), name="editor-stories-retrieve"),
+    path("stories/<uuid:pk>/update/", TantaraUpdateView.as_view(), name="editor-stories-update"),
+    path("stories/<uuid:pk>/partial-update/", TantaraPartialUpdateView.as_view(), name="editor-stories-partial-update"),
+    path("stories/<uuid:pk>/delete/", TantaraDeleteView.as_view(), name="editor-stories-delete"),
+    path("nodes/", NoeudListView.as_view(), name="editor-nodes-list"),
+    path("nodes/create/", NoeudCreateView.as_view(), name="editor-nodes-create"),
+    path("nodes/<uuid:pk>/", NoeudDetailView.as_view(), name="editor-nodes-retrieve"),
+    path("nodes/<uuid:pk>/update/", NoeudUpdateView.as_view(), name="editor-nodes-update"),
+    path("nodes/<uuid:pk>/partial-update/", NoeudPartialUpdateView.as_view(), name="editor-nodes-partial-update"),
+    path("nodes/<uuid:pk>/delete/", NoeudDeleteView.as_view(), name="editor-nodes-delete"),
+    path("options/", OptionDecisionListView.as_view(), name="editor-options-list"),
+    path("options/create/", OptionDecisionCreateView.as_view(), name="editor-options-create"),
+    path("options/<uuid:pk>/", OptionDecisionDetailView.as_view(), name="editor-options-retrieve"),
+    path("options/<uuid:pk>/update/", OptionDecisionUpdateView.as_view(), name="editor-options-update"),
+    path("options/<uuid:pk>/partial-update/", OptionDecisionPartialUpdateView.as_view(), name="editor-options-partial-update"),
+    path("options/<uuid:pk>/delete/", OptionDecisionDeleteView.as_view(), name="editor-options-delete"),
+    path("sources/", SourceListView.as_view(), name="editor-sources-list"),
+    path("sources/create/", SourceCreateView.as_view(), name="editor-sources-create"),
+    path("sources/<uuid:pk>/", SourceDetailView.as_view(), name="editor-sources-retrieve"),
+    path("sources/<uuid:pk>/update/", SourceUpdateView.as_view(), name="editor-sources-update"),
+    path("sources/<uuid:pk>/partial-update/", SourcePartialUpdateView.as_view(), name="editor-sources-partial-update"),
+    path("sources/<uuid:pk>/delete/", SourceDeleteView.as_view(), name="editor-sources-delete"),
+    path("resources/", RessourceAideListView.as_view(), name="editor-resources-list"),
+    path("resources/create/", RessourceAideCreateView.as_view(), name="editor-resources-create"),
+    path("resources/<uuid:pk>/", RessourceAideDetailView.as_view(), name="editor-resources-retrieve"),
+    path("resources/<uuid:pk>/update/", RessourceAideUpdateView.as_view(), name="editor-resources-update"),
+    path("resources/<uuid:pk>/partial-update/", RessourceAidePartialUpdateView.as_view(), name="editor-resources-partial-update"),
+    path("resources/<uuid:pk>/delete/", RessourceAideDeleteView.as_view(), name="editor-resources-delete"),
+    path("questions/", QuestionPedagogiqueListView.as_view(), name="editor-questions-list"),
+    path("questions/create/", QuestionPedagogiqueCreateView.as_view(), name="editor-questions-create"),
+    path("questions/<uuid:pk>/", QuestionPedagogiqueDetailView.as_view(), name="editor-questions-retrieve"),
+    path("questions/<uuid:pk>/update/", QuestionPedagogiqueUpdateView.as_view(), name="editor-questions-update"),
+    path("questions/<uuid:pk>/partial-update/", QuestionPedagogiquePartialUpdateView.as_view(), name="editor-questions-partial-update"),
+    path("questions/<uuid:pk>/delete/", QuestionPedagogiqueDeleteView.as_view(), name="editor-questions-delete"),
+    path("releases/", ReleaseListView.as_view(), name="editor-releases-list"),
+    path("releases/validate/", ReleaseValidateView.as_view(), name="editor-releases-validate"),
+    path("releases/publish/", ReleasePublishView.as_view(), name="editor-releases-publish"),
+    path("releases/<uuid:pk>/", ReleaseDetailView.as_view(), name="editor-releases-retrieve"),
+    path("releases/<uuid:pk>/rollback/", ReleaseRollbackView.as_view(), name="editor-releases-rollback"),
+]

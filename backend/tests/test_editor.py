@@ -46,7 +46,7 @@ def test_anonymous_cannot_access_editor(route):
     c = APIClient()
     url = "/api/editor/" + route + "/"
     assert c.get(url).status_code == 403
-    assert c.post(url, {}, format="json").status_code == 403
+    assert c.post(url + "create/", {}, format="json").status_code == 403
 
 
 def test_nonstaff_and_staff_without_permissions_denied():
@@ -59,27 +59,27 @@ def test_nonstaff_and_staff_without_permissions_denied():
     assert c.get("/api/editor/topics/").status_code == 403
     user.user_permissions.add(Permission.objects.get(codename="view_sujet"))
     assert c.get("/api/editor/topics/").status_code == 200
-    assert c.post("/api/editor/topics/", topic_payload()).status_code == 403
+    assert c.post("/api/editor/topics/create/", topic_payload()).status_code == 403
 
 
 def test_topic_complete_crud(editor):
-    r = editor.post("/api/editor/topics/", topic_payload(), format="json")
+    r = editor.post("/api/editor/topics/create/", topic_payload(), format="json")
     assert r.status_code == 201, r.data
     url = "/api/editor/topics/" + r.data["id"] + "/"
     assert editor.get(url).data["libelle_fr"] == "Respect"
     assert editor.get("/api/editor/topics/").data["count"] == 1
     assert (
-        editor.patch(url, {"libelle_fr": "Respect mutuel"}, format="json").status_code
+        editor.patch(url + "partial-update/", {"libelle_fr": "Respect mutuel"}, format="json").status_code
         == 200
     )
-    assert editor.put(url, topic_payload(), format="json").status_code == 200
-    assert editor.delete(url).status_code == 204
+    assert editor.put(url + "update/", topic_payload(), format="json").status_code == 200
+    assert editor.delete(url + "delete/").status_code == 200
     assert editor.get(url).status_code == 404
 
 
 def test_validation_returns_field_errors(editor):
     r = editor.post(
-        "/api/editor/topics/",
+        "/api/editor/topics/create/",
         {"code": "x", "libelle_fr": "X", "libelle_mg": ""},
         format="json",
     )
@@ -91,7 +91,7 @@ def test_validation_returns_field_errors(editor):
 def test_partial_update_runs_model_validation(editor):
     topic = Sujet.objects.create(**topic_payload())
     r = editor.patch(
-        f"/api/editor/topics/{topic.pk}/", {"description_fr": "Seule"}, format="json"
+        f"/api/editor/topics/{topic.pk}/partial-update/", {"description_fr": "Seule"}, format="json"
     )
     assert r.status_code == 400
     topic.refresh_from_db()
@@ -106,7 +106,7 @@ def test_language_default_slot_validation(editor):
         nom_natif="Français",
         par_defaut=True,
     )
-    r = editor.post("/api/editor/languages/", data, format="json")
+    r = editor.post("/api/editor/languages/create/", data, format="json")
     assert r.status_code == 201, r.data
     assert Langue.objects.get().default_slot == 1
 
@@ -134,7 +134,7 @@ def make_story(slug="new-story", numero="04"):
 def test_new_story_not_limited_to_three(editor):
     s = make_story()
     r = editor.patch(
-        f"/api/editor/stories/{s.pk}/", {"titre_fr": "Nouvelle histoire"}, format="json"
+        f"/api/editor/stories/{s.pk}/partial-update/", {"titre_fr": "Nouvelle histoire"}, format="json"
     )
     assert r.status_code == 200, r.data
 
@@ -160,7 +160,7 @@ def test_cross_story_transition_rejected(editor):
         texte_mg="T",
         noeud_suivant=str(target.pk),
     )
-    r = editor.post("/api/editor/nodes/", data, format="json")
+    r = editor.post("/api/editor/nodes/create/", data, format="json")
     assert r.status_code == 400, r.data
 
 
@@ -185,7 +185,7 @@ def test_delete_protected_target_returns_conflict(editor):
         texte_mg="T",
         noeud_suivant=end,
     )
-    r = editor.delete(f"/api/editor/nodes/{end.pk}/")
+    r = editor.delete(f"/api/editor/nodes/{end.pk}/delete/")
     assert r.status_code == 409
     assert Noeud.objects.count() == 2
 
@@ -193,12 +193,12 @@ def test_delete_protected_target_returns_conflict(editor):
 def test_csrf_required_for_staff_writes(staff):
     c = Client(enforce_csrf_checks=True)
     c.force_login(staff)
-    assert c.post("/api/editor/topics/", topic_payload()).status_code == 403
-    c.get("/api/session/")
+    assert c.post("/api/editor/topics/create/", topic_payload()).status_code == 403
+    c.get("/admin/")
     token = c.cookies["csrftoken"].value
     assert (
         c.post(
-            "/api/editor/topics/",
+            "/api/editor/topics/create/",
             topic_payload(),
             content_type="application/json",
             HTTP_X_CSRFTOKEN=token,
@@ -207,31 +207,11 @@ def test_csrf_required_for_staff_writes(staff):
     )
 
 
-def test_session_isolated_rotated_and_deleted():
-    a, b = Client(enforce_csrf_checks=True), Client(enforce_csrf_checks=True)
-    assert a.post("/api/session/").status_code == 403
-    assert a.get("/api/session/").json()["active"] is False
-    token = a.cookies["csrftoken"].value
-    r = a.post(
-        "/api/session/",
-        {"language": "mg"},
-        content_type="application/json",
-        HTTP_X_CSRFTOKEN=token,
-    )
-    assert r.status_code == 201
-    old_key = a.session.session_key
-    assert "id" not in r.json()
-    assert b.get("/api/session/").json()["active"] is False
-    assert a.get("/api/session/").json()["language"] == "mg"
-    assert (
-        a.post(
-            "/api/session/", {}, content_type="application/json", HTTP_X_CSRFTOKEN=token
-        ).status_code
-        == 201
-    )
-    assert old_key != a.session.session_key
-    assert a.delete("/api/session/", HTTP_X_CSRFTOKEN=token).status_code == 204
-    assert a.get("/api/session/").json()["active"] is False
+def test_visitor_session_endpoint_absent():
+    """Aucun stockage de session de joueur sur le backend public."""
+    r = Client().get('/api/session/')
+    assert r.status_code == 404
+    assert r.json()['error']['code'] == 'NOT_FOUND'
 
 
 def test_admin_registered_and_docs_protected(editor):
@@ -266,7 +246,7 @@ def test_upload_reencoded_under_media(editor, settings, tmp_path):
         alt_mg="Sary",
         licence="CC0",
     )
-    r = editor.post("/api/editor/visuals/", data, format="multipart")
+    r = editor.post("/api/editor/visuals/create/", data, format="multipart")
     assert r.status_code == 201, r.data
     assert r.data["fichier"].endswith(".png")
     assert list(tmp_path.rglob("*.png"))
@@ -408,7 +388,7 @@ def test_relation_summary(editor):
         "audience_fr": "Tous",
         "audience_mg": "Rehetra",
     }
-    r = editor.post("/api/editor/resources/", data, format="json")
+    r = editor.post("/api/editor/resources/create/", data, format="json")
     assert r.status_code == 201, r.data
     assert r.data["source_detail"] == {"id": str(source.pk), "label": "internal"}
-    assert editor.delete(f"/api/editor/sources/{source.pk}/").status_code == 409
+    assert editor.delete(f"/api/editor/sources/{source.pk}/delete/").status_code == 409

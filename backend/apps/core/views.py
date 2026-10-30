@@ -1,123 +1,76 @@
-from rest_framework.permissions import AllowAny
-from datetime import datetime, timedelta
-from django.db import transaction, IntegrityError
-from django.db.models.deletion import ProtectedError, RestrictedError
-from django.middleware.csrf import get_token
-from django.utils import timezone
-from django.utils.decorators import method_decorator
-from django.views.decorators.csrf import csrf_protect
-from rest_framework import status, viewsets, filters
-from rest_framework.exceptions import APIException
-from rest_framework.response import Response
-from rest_framework.throttling import ScopedRateThrottle
+"""Edition staff : une APIView explicite par méthode HTTP, aucun ViewSet."""
+
 from rest_framework.views import APIView
-from drf_yasg.utils import swagger_auto_schema
-from helpers.helper import time_elapsed
+from rest_framework.permissions import IsAdminUser
+from apps.core.editor_service import (editor_list, editor_detail, editor_create, editor_update, editor_delete, handle_editor_exception)
 from .models import Langue
-from .permissions import EditorialPermissions
-from .serializers import LangueEditorSerializer, SessionSerializer
+from .serializers import LangueEditorSerializer
+from .swagger import langue_docs
 
 
-class Conflict(APIException):
-    status_code = 409
-    default_detail = (
-        "Opération incompatible avec les relations ou les contraintes existantes."
-    )
-    default_code = "conflict"
+class LangueListView(APIView):
+    permission_classes = [IsAdminUser]
 
-
-class EditorialViewSet(viewsets.ModelViewSet):
-    permission_classes = [EditorialPermissions]
-    filter_backends = [filters.SearchFilter, filters.OrderingFilter]
-    ordering_fields = ["created_at", "updated_at"]
-    ordering = ["-created_at"]
-    lookup_value_regex = "[0-9a-f-]{36}"
-
-    def perform_create(self, serializer):
-        self.save_validated(serializer)
-
-    def perform_update(self, serializer):
-        self.save_validated(serializer)
-
-    def save_validated(self, serializer):
-        try:
-            with transaction.atomic():
-                serializer.save()
-        except IntegrityError as exc:
-            raise Conflict() from exc
-
-    def perform_destroy(self, instance):
-        try:
-            with transaction.atomic():
-                instance.delete()
-        except (ProtectedError, RestrictedError, IntegrityError) as exc:
-            raise Conflict() from exc
-
-
-class LangueViewSet(EditorialViewSet):
-    queryset = Langue.objects.all()
-    serializer_class = LangueEditorSerializer
-
-
-@method_decorator(csrf_protect, name="dispatch")
-class VisitorSessionView(APIView):
-    """Session technique pseudonyme. Aucun parcours, score ou témoignage enregistré."""
-
-    permission_classes = [AllowAny]
-
-    throttle_classes = [ScopedRateThrottle]
-    throttle_scope = "session"
-
-    def payload(self, request):
-        started = request.session.get("visitor_started_at")
-        if not started:
-            return {"active": False, "language": "fr"}
-        return {
-            "active": True,
-            "language": request.session.get("visitor_language", "fr"),
-            "expires_at": request.session.get_expiry_date(),
-            "elapsed_seconds": time_elapsed(datetime.fromisoformat(started)),
-        }
-
-    @swagger_auto_schema(responses={200: SessionSerializer})
+    @langue_docs["list"]
     def get(self, request):
-        get_token(request)
-        return Response(self.payload(request))
+        try:
+            return editor_list(request, Langue, LangueEditorSerializer, search_fields=('code', 'nom_fr', 'nom_mg'))
+        except Exception as exc:
+            return handle_editor_exception(exc)
 
-    @swagger_auto_schema(
-        request_body=SessionSerializer, responses={201: SessionSerializer}
-    )
+
+class LangueDetailView(APIView):
+    permission_classes = [IsAdminUser]
+
+    @langue_docs["retrieve"]
+    def get(self, request, pk):
+        try:
+            return editor_detail(request, Langue, LangueEditorSerializer, pk)
+        except Exception as exc:
+            return handle_editor_exception(exc)
+
+
+class LangueCreateView(APIView):
+    permission_classes = [IsAdminUser]
+
+    @langue_docs["create"]
     def post(self, request):
-        serializer = SessionSerializer(data=request.data)
-        serializer.is_valid(raise_exception=True)
-        request.session.cycle_key()
-        request.session["visitor_started_at"] = timezone.now().isoformat()
-        request.session["visitor_language"] = serializer.validated_data.get(
-            "language", "fr"
-        )
-        request.session.set_expiry(timezone.now() + timedelta(days=1))
-        return Response(self.payload(request), status=status.HTTP_201_CREATED)
+        try:
+            return editor_create(request, Langue, LangueEditorSerializer)
+        except Exception as exc:
+            return handle_editor_exception(exc)
 
-    @swagger_auto_schema(
-        request_body=SessionSerializer, responses={200: SessionSerializer}
-    )
-    def patch(self, request):
-        if not request.session.get("visitor_started_at"):
-            return Response(
-                {"detail": "Créer une session avant de la modifier."}, status=404
-            )
-        serializer = SessionSerializer(data=request.data)
-        serializer.is_valid(raise_exception=True)
-        if "language" in serializer.validated_data:
-            request.session["visitor_language"] = serializer.validated_data["language"]
-        return Response(self.payload(request))
 
-    @swagger_auto_schema(responses={204: "Session visiteur effacée"})
-    def delete(self, request):
-        if request.user.is_authenticated:
-            request.session.pop("visitor_started_at", None)
-            request.session.pop("visitor_language", None)
-            request.session.cycle_key()
-        else:
-            request.session.flush()
-        return Response(status=204)
+class LangueUpdateView(APIView):
+    permission_classes = [IsAdminUser]
+
+    @langue_docs["update"]
+    def put(self, request, pk):
+        try:
+            return editor_update(request, Langue, LangueEditorSerializer, pk)
+        except Exception as exc:
+            return handle_editor_exception(exc)
+
+
+class LanguePartialUpdateView(APIView):
+    permission_classes = [IsAdminUser]
+
+    @langue_docs["partial"]
+    def patch(self, request, pk):
+        try:
+            return editor_update(request, Langue, LangueEditorSerializer, pk, partial=True)
+        except Exception as exc:
+            return handle_editor_exception(exc)
+
+
+class LangueDeleteView(APIView):
+    permission_classes = [IsAdminUser]
+
+    @langue_docs["delete"]
+    def delete(self, request, pk):
+        try:
+            return editor_delete(request, Langue, pk)
+        except Exception as exc:
+            return handle_editor_exception(exc)
+
+

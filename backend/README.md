@@ -30,8 +30,8 @@ La base initiale ne contient pas les vraies histoires ni leurs illustrations : e
 | Chemin | Responsabilité |
 |---|---|
 | `config/settings.py` | Base de données, sessions, CSRF, CORS, médias, Swagger |
-| `config/editor_urls.py` | Routeur des CRUD éditoriaux |
-| `apps/core/` | Langues, permissions, validation commune, session visiteur |
+| `config/editor_urls.py` | Routes APIView explicites, aucun routeur ni ViewSet |
+| `apps/core/` | Langues, permissions, réponses JSON, services CRUD communs et Swagger |
 | `apps/content_api/` | Sujets, illustrations, histoires, nœuds, options |
 | `apps/resources/` | Sources et ressources d'aide |
 | `apps/pedagogie/` | Questions pédagogiques |
@@ -39,7 +39,7 @@ La base initiale ne contient pas les vraies histoires ni leurs illustrations : e
 | `helpers/helper.py` | Temps écoulé, URL de média, normalisation d'image |
 | `media/` | Illustrations publiques, jamais des preuves ou témoignages |
 | `content/releases/` | JSON publiés figés |
-| `tests/` | Contrat public, graphes, droits, CRUD, sessions, uploads, publication |
+| `tests/` | Contrat public, graphes, droits, APIView, Swagger, CSRF, uploads et publication |
 
 Chaque application métier possède son `admin.py` (nom reconnu par Django), ses modèles, migrations et, selon ses endpoints, serializers, vues et routes. Les modèles `User` et `Group` standards de Django sont disponibles dans l'admin : les visiteurs n'ont pas de compte `User`.
 
@@ -49,13 +49,12 @@ Chaque application métier possède son `admin.py` (nom reconnu par Django), ses
 |---|---|
 | `/api/v1/` | Lecture publique de snapshots validés ; aucune écriture |
 | `/api/editor/` | Compte actif, `is_staff=True`, permission Django par modèle et opération |
-| `/api/session/` | Visiteur anonyme ; écritures protégées par CSRF |
 | `/admin/` | Connexion Django ; permissions par modèle |
 | Documentation | Connexion staff requise, même en développement |
 
 Un compte authentifié sans `is_staff` ne peut pas éditer. Un membre staff sans permission ne peut pas consulter les données éditoriales. Dans l'admin, créer des groupes puis attribuer `view`, `add`, `change`, `delete` selon les besoins. Les superutilisateurs ont tous les droits.
 
-Les UUID d'objets éditoriaux sont renvoyés pour référencer les relations. Ce sont des identifiants, pas des secrets ni des autorisations. Les réponses ajoutent des objets `*_detail` / `*_details` contenant l'UUID et un libellé. Les données publiques gardent leurs slugs et clés métier. Ni clé de session ni identifiant de compte n'est exposé par l'API visiteur.
+Les UUID d'objets éditoriaux sont renvoyés pour référencer les relations. Ce sont des identifiants, pas des secrets ni des autorisations. Les réponses ajoutent des objets `*_detail` / `*_details` contenant l'UUID et un libellé. Les données publiques gardent leurs slugs et clés métier. Les visiteurs ne disposent d’aucune session applicative SAFIDIKO.
 
 ## CRUD éditoriaux
 
@@ -66,13 +65,13 @@ Pour chacune :
 | Verbe | URL | Opération |
 |---|---|---|
 | GET | `/<ressource>/` | Liste paginée, 25 éléments par page |
-| POST | `/<ressource>/` | Création |
-| GET | `/<ressource>/<uuid>/` | Détail |
-| PUT | `/<ressource>/<uuid>/` | Mise à jour selon les champs requis du serializer |
-| PATCH | `/<ressource>/<uuid>/` | Modification partielle |
-| DELETE | `/<ressource>/<uuid>/` | Suppression, si les dépendances l'autorisent |
+| POST | `/<ressource>/create/` | Création (201 JSON) |
+| GET | `/<ressource>/<uuid>/` | Détail (200 JSON) |
+| PUT | `/<ressource>/<uuid>/update/` | Mise à jour complète (200 JSON) |
+| PATCH | `/<ressource>/<uuid>/partial-update/` | Modification partielle (200 JSON) |
+| DELETE | `/<ressource>/<uuid>/delete/` | Suppression (200 `{ "deleted": true }`) |
 
-`?page=2`, `?search=mot`, `?ordering=-updated_at` sont disponibles. La recherche porte sur les champs textuels déclarés de chaque ressource, sauf les langues. Les créations et modifications utilisent JSON ; les visuels acceptent aussi `multipart/form-data` avec le champ `fichier`.
+`?page=2`, `?search=mot`, `?ordering=-updated_at` sont disponibles. La recherche porte sur les champs textuels explicitement autorisés pour chaque ressource. Les créations et modifications utilisent JSON ; pour les visuels, les opérations d’écriture utilisent `multipart/form-data` avec le champ `fichier` et des `manual_parameters` Swagger. Le fichier et les chemins d’asset disposent aussi d’un champ `*_url` en lecture.
 
 Les validations vérifient aussi les règles de modèle sur PATCH, l'unicité et les contraintes. Les erreurs de saisie sont renvoyées sous `error.fields`. Les suppressions bloquées par des relations retournent `409 CONFLICT` ; elles ne forcent pas la suppression des objets liés. Les parents d'un nœud et d'une option ne peuvent pas être changés après création.
 
@@ -100,19 +99,15 @@ python manage.py rollback_content --help
 
 L'importeur `import_public_content` conserve son format historique V14 (trois histoires) pour reprendre les anciens JSON. Les nouvelles histoires se créent librement dans l'admin ou l'API éditoriale.
 
-## Sessions et intégration frontend
+## Administration, CSRF et frontend
 
-L'identité technique est pseudonyme : Django conserve une session serveur derrière un cookie `sessionid` HttpOnly, sans créer de profil utilisateur. Le simple accès aux histoires ne crée pas de session. Le frontend choisit quand initialiser la session :
+Les APIView de l’éditeur nécessitent **deux conditions indépendantes** : compte staff authentifié en session Django et permission `view/add/change/delete` du modèle. Pour tester Swagger, se connecter sur `/admin/login/`, puis fournir le cookie `csrftoken` comme en-tête `X-CSRFToken` lors des écritures. Ce mécanisme ne concerne pas la navigation publique.
 
-1. `GET /api/session/`, avec `credentials: 'include'`, initialise le cookie CSRF et renvoie l'état de session.
-2. Lire le cookie `csrftoken` et le transmettre dans `X-CSRFToken` sur chaque écriture. Swagger propose aussi ce champ via **Authorize**.
-3. `POST /api/session/` avec `{"language":"fr"}` crée ou renouvelle la session, en tournant sa clé.
-4. `PATCH /api/session/` change `language` (`fr` ou `mg`).
-5. `DELETE /api/session/` efface la session visiteur. Si l'appelant est connecté à l'admin, son authentification est conservée.
+Conformément au cahier des charges concours, la route `/api/session/` a été supprimée : le navigateur joue les Tantara sans compte, session applicative, progression serveur ni cookie de joueur. Le frontend utilise seulement `GET /api/v1/` ; les requêtes CORS cross-origin n’autorisent aucun envoi de cookie (`CORS_ALLOW_CREDENTIALS=False`). Les sessions Django restent nécessaires à l’administration privée.
 
-La réponse contient `active`, `language`, `expires_at` et `elapsed_seconds` lorsque la session existe. Durée de la session visiteur : 24 heures. Une autre session ne peut pas être sélectionnée par UUID dans l'URL ou dans le corps de requête. Les choix, scores, récits personnels et preuves ne sont pas enregistrés.
+Une classe `APIView` ne contient **qu’une seule méthode** (get, post, put, patch ou delete), chacune avec son `try/except Exception` et son décorateur Swagger importé d’un fichier `swagger.py`. Les opérations partagées sont placées dans `apps/core/editor_service.py`, pas dans un ViewSet. Django REST Framework gère automatiquement `HEAD` et `OPTIONS`.
 
-Pour les écritures éditoriales, se connecter d'abord via `/admin/login/` : le jeton CSRF ne remplace jamais l'authentification. Déployer de préférence frontend et API sur la même origine ou le même site. Les origines CORS autorisées sont explicites ; `SameSite=Lax` ne permet pas de réutiliser les cookies entre deux sites indépendants. Un proxy de même origine évite ce problème. Le frontend doit être adapté : cette archive ne modifie pas son code.
+Les erreurs 400, 403, 404, 405, 409 et 500 utilisent le format `{ "error": { "code": "...", "message": "..." } }`, avec `fields` optionnel pour la validation. Les succès CRUD sont JSON (la suppression renvoie 200, pas 204). Exceptions HTTP sans corps : `304 Not Modified` et les réponses `HEAD`.
 
 ## Médias
 
@@ -144,8 +139,8 @@ python manage.py migrate --check
 python -m pytest -q
 ```
 
-Les tests exécutés ici utilisent SQLite. Le parcours de publication et restauration, les formulaires d'administration, le schéma Swagger, les droits, les sessions isolées, CSRF et les uploads font partie des tests. MySQL et le reverse proxy doivent être vérifiés dans l'environnement cible.
+Les tests sont prévus pour SQLite. Le parcours de publication et restauration, les formulaires d’administration, le schéma Swagger, les droits, les APIView, CSRF et les uploads sont couverts. Ils doivent être exécutés sur Kali ; ils n’ont pas été lancés dans l’environnement de préparation du patch. MySQL et le reverse proxy doivent être vérifiés dans l'environnement cible.
 
-En production : `DEBUG=false`, secret aléatoire, hôtes et origines exacts, paramètres MySQL, HTTPS, `collectstatic --noinput`, puis `check --deploy`. Les cookies deviennent Secure. Ne déclarer `TRUST_PROXY_SSL_HEADER=true` que si le proxy contrôle cet en-tête. Ajouter au proxy une limite des corps de requête et une limitation des tentatives de connexion admin. La limitation DRF des sessions utilise le cache local ; plusieurs workers nécessitent un cache partagé si une limite globale est souhaitée.
+En production : `DEBUG=false`, secret aléatoire, hôtes et origines exacts, paramètres MySQL, HTTPS, `collectstatic --noinput`, puis `check --deploy`. Les cookies deviennent Secure. Ne déclarer `TRUST_PROXY_SSL_HEADER=true` que si le proxy contrôle cet en-tête. Ajouter au proxy une limite des corps de requête et une limitation des tentatives de connexion admin. Les protections contre les tentatives de connexion doivent également être configurées au niveau du proxy ou d’une solution dédiée.
 
 Exécuter régulièrement `python manage.py clearsessions` pour supprimer les sessions expirées. Sauvegarder la base, les releases et les médias ensemble. Aucune purge de médias référencés par une ancienne release ne doit être faite à l'aveugle.

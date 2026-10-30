@@ -9,8 +9,11 @@ from rest_framework.response import Response
 LOG = logging.getLogger("safidiko")
 
 
-def error(status, code, message):
-    return Response({"error": {"code": code, "message": message}}, status=status)
+def error(status, code, message, *, fields=None):
+    payload = {"error": {"code": code, "message": message}}
+    if fields is not None:
+        payload["error"]["fields"] = fields
+    return Response(payload, status=status)
 
 
 def failed(exc):
