@@ -102,6 +102,11 @@ def read_content(relative_path):
 def decorate_story_urls(data, manifest, request):
     """Les *_url sont absolues et correspondent exclusivement aux assets déclarés."""
     assets = manifest.get("assets", {})
+    cover = data.get("cover")
+    if cover and any(e.get("path") == cover and e.get("type") == "MEDIA" for e in manifest.get("files", [])):
+        data["cover_url"] = request.build_absolute_uri(reverse("story-cover", kwargs={
+            "version": manifest["version"], "slug": data["id"],
+        }))
     visual = data.get("heroVisual")
     if visual and visual in assets:
         data["heroVisual_url"] = media_url(assets[visual], request)
@@ -194,8 +199,10 @@ def publication_payload():
                 raise ValidationError(
                     f"{story.slug}: relectures bilingues obligatoires"
                 )
-        if not story.visuel_heros_id or story.visuel_heros.code not in assets:
-            raise ValidationError(f"{story.slug}: visuel héros absent")
+        if not story.visuel_heros_id and not story.image_cover:
+            raise ValidationError(f"{story.slug}: image de couverture ou visuel héros requis")
+        if story.visuel_heros_id and story.visuel_heros.code not in assets:
+            raise ValidationError(f"{story.slug}: visuel héros invalide")
         for node in story.noeuds.all():
             node.full_clean()
             if node.visuel_id and node.visuel.code not in assets:
@@ -337,6 +344,25 @@ def publish(numero, journal=""):
                     "language": None,
                 }
             )
+        # Couvertures publiques figées dans le snapshot : aucune dépendance au brouillon.
+        for relative, story_data in sorted(payload.items()):
+            if not relative.startswith("stories/") or not story_data.get("cover"):
+                continue
+            story = Tantara.objects.get(slug=story_data["id"])
+            target_path = story_data["cover"]
+            if not re.fullmatch(r"covers/[a-z0-9-]+\.png", target_path):
+                raise ValidationError("Chemin de couverture invalide")
+            target = staging / target_path
+            target.parent.mkdir(parents=True, exist_ok=True)
+            digest = hashlib.sha256()
+            if not story.image_cover:
+                raise ValidationError("Couverture absente lors de la publication")
+            with story.image_cover.open("rb") as source, target.open("wb") as dest:
+                for chunk in iter(lambda: source.read(1024 * 1024), b""):
+                    dest.write(chunk)
+                    digest.update(chunk)
+            entries.append({"path": target_path, "type": "MEDIA", "sha256": digest.hexdigest(),
+                            "bytes": target.stat().st_size, "language": None})
         # Les clips privés sont copiés dans le snapshot ; jamais un lien direct au brouillon.
         for relative, media_asset in sorted(_studio_media_in_payload(payload).items()):
             target = staging / relative

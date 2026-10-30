@@ -1,0 +1,691 @@
+--- a/backend/apps/content_api/admin.py
++++ b/backend/apps/content_api/admin.py
+@@ -23,6 +23,7 @@
+ @admin.register(Tantara)
+ class TantaraAdmin(admin.ModelAdmin):
+     list_display = ("slug", "numero", "titre_fr", "statut_editorial", "updated_at")
++    fields = ("slug", "numero", "titre_fr", "titre_mg", "sous_titre_fr", "sous_titre_mg", "theme_fr", "theme_mg", "description_fr", "description_mg", "avertissement_fr", "avertissement_mg", "duree", "decisions_attendues", "palette", "image_cover", "visuel_heros", "sujets", "ordre", "revision", "statut_editorial", "valide_le", "validateur_role", "relecture_fr_le", "relecture_mg_le", "relecteur_fr_role", "relecteur_mg_role", "note_validation")
+     search_fields = ("slug", "numero", "titre_fr")
+     list_filter = ("statut_editorial",)
+     readonly_fields = ("id", "created_at", "updated_at")
+--- a/backend/apps/content_api/apps.py
++++ b/backend/apps/content_api/apps.py
+@@ -4,3 +4,6 @@
+ class ContentApiConfig(AppConfig):
+     default_auto_field = "django.db.models.BigAutoField"
+     name = "apps.content_api"
++
++    def ready(self):
++        from . import signals  # noqa: F401
+--- a/backend/apps/content_api/editor_views.py
++++ b/backend/apps/content_api/editor_views.py
+@@ -168,6 +168,7 @@
+ 
+ class TantaraCreateView(APIView):
+     permission_classes = [IsAdminUser]
++    parser_classes = [MultiPartParser, FormParser]
+ 
+     @tantara_docs["create"]
+     def post(self, request):
+@@ -179,6 +180,7 @@
+ 
+ class TantaraUpdateView(APIView):
+     permission_classes = [IsAdminUser]
++    parser_classes = [MultiPartParser, FormParser]
+ 
+     @tantara_docs["update"]
+     def put(self, request, pk):
+@@ -190,6 +192,7 @@
+ 
+ class TantaraPartialUpdateView(APIView):
+     permission_classes = [IsAdminUser]
++    parser_classes = [MultiPartParser, FormParser]
+ 
+     @tantara_docs["partial"]
+     def patch(self, request, pk):
+--- a/backend/apps/content_api/migrations/0004_tantara_image_cover.py
++++ b/backend/apps/content_api/migrations/0004_tantara_image_cover.py
+@@ -0,0 +1,13 @@
++from django.db import migrations, models
++
++
++class Migration(migrations.Migration):
++    dependencies = [("content_api", "0003_brouillongraphe")]
++
++    operations = [
++        migrations.AddField(
++            model_name="tantara",
++            name="image_cover",
++            field=models.ImageField(upload_to="covers/%Y/%m/", null=True, blank=True),
++        ),
++    ]
+--- a/backend/apps/content_api/models.py
++++ b/backend/apps/content_api/models.py
+@@ -89,6 +89,8 @@
+     avertissement_fr = models.TextField()
+     avertissement_mg = models.TextField()
+     duree = models.CharField(max_length=40)
++    # Couverture éditoriale indépendante du visuel héros existant.
++    image_cover = models.ImageField(upload_to="covers/%Y/%m/", null=True, blank=True)
+     decisions_attendues = models.PositiveSmallIntegerField()
+     palette = models.SlugField(max_length=60)
+     visuel_heros = models.ForeignKey(
+--- a/backend/apps/content_api/serializers.py
++++ b/backend/apps/content_api/serializers.py
+@@ -66,6 +66,7 @@
+         "expectedDecisions": s.decisions_attendues,
+         "palette": s.palette,
+         "heroVisual": s.visuel_heros.code if s.visuel_heros else "",
++        "cover": f"covers/{s.slug}.png" if s.image_cover else "",
+     }
+     if s.visuel_heros and request:
+         data["heroVisual_url"] = absolute_static_url(request, s.visuel_heros)
+@@ -86,6 +87,8 @@
+     expectedDecisions = serializers.IntegerField()
+     palette = serializers.CharField()
+     heroVisual = serializers.CharField()
++    cover = serializers.CharField(required=False, allow_blank=True)
++    cover_url = serializers.URLField(required=False)
+     heroVisual_url = serializers.URLField(required=False)
+ 
+ 
+@@ -183,6 +186,37 @@
+ 
+ 
+ class TantaraEditorSerializer(FrenchFirstMixin, ValidatedModelSerializer):
++    image_cover_url = serializers.SerializerMethodField(read_only=True)
++    effacer_couverture = serializers.BooleanField(write_only=True, required=False, default=False)
++
++    def get_image_cover_url(self, obj):
++        if not obj.image_cover:
++            return None
++        url = obj.image_cover.url
++        request = self.context.get("request")
++        return request.build_absolute_uri(url) if request else url
++
++    def validate_image_cover(self, upload):
++        if upload is None:
++            return None
++        from helpers.helper import normalize_image
++        from django.core.exceptions import ValidationError as DjangoValidationError
++        try:
++            clean = normalize_image(upload)  # PNG réencodé, sans métadonnées d'origine.
++        except DjangoValidationError as exc:
++            raise serializers.ValidationError(exc.messages) from exc
++        if clean.size > 5 * 1024 * 1024:
++            raise serializers.ValidationError("Image réencodée limitée à 5 Mo.")
++        return clean
++
++    def validate(self, attrs):
++        clear = attrs.pop("effacer_couverture", False)
++        if clear and attrs.get("image_cover") is not None:
++            raise serializers.ValidationError({"image_cover": "Ne pas envoyer une image et demander son retrait simultanément."})
++        if clear:
++            attrs["image_cover"] = None
++        return super().validate(attrs)
++
+     def validate_duree(self, value):
+         import re
+         match = re.fullmatch(r'([1-9][0-9]{0,2}) min', value.strip())
+@@ -235,6 +269,9 @@
+             "avertissement_fr",
+             "avertissement_mg",
+             "duree",
++            "image_cover",
++            "image_cover_url",
++            "effacer_couverture",
+             "decisions_attendues",
+             "palette",
+             "visuel_heros",
+@@ -244,7 +281,7 @@
+             "visuel_heros_detail",
+             "sujets_details",
+         )
+-        read_only_fields = ("id", "created_at", "updated_at", "publie_le")
++        read_only_fields = ("id", "created_at", "updated_at", "publie_le", "image_cover_url")
+ 
+ 
+ class NoeudEditorSerializer(FrenchFirstMixin, ValidatedModelSerializer):
+--- a/backend/apps/content_api/signals.py
++++ b/backend/apps/content_api/signals.py
+@@ -0,0 +1,33 @@
++"""Nettoyage des couvertures non référencées après commit SQL réussi."""
++from django.db import transaction
++from django.db.models.signals import pre_save, post_save, post_delete
++from django.dispatch import receiver
++from .models import Tantara
++
++
++def _delete_on_commit(field, name):
++    if name:
++        storage = field.storage
++        transaction.on_commit(lambda: storage.delete(name))
++
++
++@receiver(pre_save, sender=Tantara)
++def remember_old_cover(sender, instance, **kwargs):
++    instance._old_cover_name = None
++    if instance.pk:
++        instance._old_cover_name = (sender.objects.filter(pk=instance.pk)
++                                    .values_list("image_cover", flat=True).first())
++
++
++@receiver(post_save, sender=Tantara)
++def remove_replaced_cover(sender, instance, **kwargs):
++    old = getattr(instance, "_old_cover_name", None)
++    new = instance.image_cover.name if instance.image_cover else None
++    if old and old != new:
++        _delete_on_commit(instance.image_cover, old)
++
++
++@receiver(post_delete, sender=Tantara)
++def remove_deleted_story_cover(sender, instance, **kwargs):
++    if instance.image_cover:
++        _delete_on_commit(instance.image_cover, instance.image_cover.name)
+--- a/backend/apps/content_api/swagger.py
++++ b/backend/apps/content_api/swagger.py
+@@ -58,6 +58,8 @@
+     "expectedDecisions": openapi.Schema(type=openapi.TYPE_INTEGER),
+     "palette": str_field(),
+     "heroVisual": str_field(),
++    "cover": str_field("Chemin versionné de la couverture publiée"),
++    "cover_url": str_field("URL publique de la couverture publiée (si disponible)"),
+     "heroVisual_url": str_field("URL absolue si fichier présent"),
+ }
+ required = [
+@@ -86,7 +88,7 @@
+ )
+ story_list_doc = swagger_auto_schema(
+     tags=["Tantara"],
+-    operation_summary="Liste des trois Tantara",
++    operation_summary="Liste des Tantara publiés",
+     operation_description="GET sans identité, réponses bilingues. HEAD et OPTIONS également supportés.",
+     responses={
+         200: openapi.Response(
+@@ -101,7 +103,7 @@
+ story_detail_doc = swagger_auto_schema(
+     tags=["Tantara"],
+     operation_summary="Graphe narratif complet",
+-    operation_description="Slug limité à aza-zaraina, tsy-irery et aza-manaiky.",
++    operation_description="Slug public d’un Tantara présent dans la release active.",
+     responses={
+         200: openapi.Response("Récit intégral", story_detail),
+         304: openapi.Response("ETag non modifié (sans corps)"),
+@@ -118,8 +120,60 @@
+ 
+ visuel_docs = editor_swagger_docs("Visuel", VisuelEditorSerializer, multipart=True, manual_parameters=visual_form_parameters())
+ 
+-tantara_docs = editor_swagger_docs("Tantara", TantaraEditorSerializer)
++def tantara_form_parameters(*, required_fields=True):
++    """Swagger 2.0 multipart : manuel, sans request_body (fichier dans formData)."""
++    fields = [
++        ("slug", openapi.TYPE_STRING), ("numero", openapi.TYPE_STRING),
++        ("titre_fr", openapi.TYPE_STRING), ("sous_titre_fr", openapi.TYPE_STRING),
++        ("theme_fr", openapi.TYPE_STRING), ("description_fr", openapi.TYPE_STRING),
++        ("avertissement_fr", openapi.TYPE_STRING),
++        ("duree", openapi.TYPE_STRING), ("decisions_attendues", openapi.TYPE_INTEGER),
++        ("palette", openapi.TYPE_STRING), ("ordre", openapi.TYPE_INTEGER),
++        ("image_cover", openapi.TYPE_FILE), ("effacer_couverture", openapi.TYPE_BOOLEAN),
++        ("visuel_heros", openapi.TYPE_STRING),
++        ("revision", openapi.TYPE_STRING),
++        ("statut_editorial", openapi.TYPE_STRING),
++        ("valide_le", openapi.TYPE_STRING),
++        ("validateur_role", openapi.TYPE_STRING),
++        ("relecture_fr_le", openapi.TYPE_STRING),
++        ("relecture_mg_le", openapi.TYPE_STRING),
++        ("relecteur_fr_role", openapi.TYPE_STRING),
++        ("relecteur_mg_role", openapi.TYPE_STRING),
++        ("note_validation", openapi.TYPE_STRING),
++    ]
++    mandatory = {
++        "slug", "numero", "titre_fr", "sous_titre_fr", "theme_fr",
++        "description_fr", "avertissement_fr", "duree", "decisions_attendues", "palette"
++    } if required_fields else set()
++    return [
++        openapi.Parameter(
++            name, openapi.IN_FORM, type=kind, required=name in mandatory,
++            description=(
++                "Couverture facultative PNG/JPEG/WebP, max. 5 Mo ; réencodée en PNG."
++                if name == "image_cover" else
++                "true pour supprimer la couverture actuelle (exclusif de image_cover)."
++                if name == "effacer_couverture" else
++                "Durée au format « 6 min »." if name == "duree" else
++                "Texte source FR : traduction MG en file d'attente." if name.endswith("_fr") else
++                "Champ du formulaire Tantara."
++            ),
++        ) for name, kind in fields
++    ]
++
++
++tantara_docs = editor_swagger_docs(
++    "Tantara", TantaraEditorSerializer, multipart=True,
++    manual_parameters=tantara_form_parameters(),
++    partial_parameters=tantara_form_parameters(required_fields=False),
++)
+ 
+ noeud_docs = editor_swagger_docs("Noeud", NoeudEditorSerializer)
+ 
+ optiondecision_docs = editor_swagger_docs("OptionDecision", OptionDecisionEditorSerializer)
++
++
++published_cover_doc = swagger_auto_schema(
++    tags=["Tantara"],
++    operation_summary="Couverture PNG d'une release publiée",
++    responses={200: openapi.Response("Image PNG versionnée"), 404: "Introuvable", 503: "Release invalide"},
++)
+--- a/backend/apps/content_api/urls.py
++++ b/backend/apps/content_api/urls.py
+@@ -1,7 +1,8 @@
+ from django.urls import path
+-from .views import StoriesListView, StoryDetailView
++from .views import StoriesListView, StoryDetailView, PublishedStoryCoverAPIView
+ 
+ urlpatterns = [
++    path("covers/<str:version>/<slug:slug>/", PublishedStoryCoverAPIView.as_view(), name="story-cover"),
+     path("stories/", StoriesListView.as_view(), name="stories-list"),
+     path("stories/<slug:slug>/", StoryDetailView.as_view(), name="stories-detail"),
+ ]
+--- a/backend/apps/content_api/views.py
++++ b/backend/apps/content_api/views.py
+@@ -9,7 +9,7 @@
+     decorate_story_urls,
+     active_release,
+ )
+-from .swagger import story_list_doc, story_detail_doc
++from .swagger import story_list_doc, story_detail_doc, published_cover_doc
+ 
+ 
+ class StoriesListView(APIView):
+@@ -52,3 +52,49 @@
+             return error(503, "CONTENT_NOT_PUBLISHED", "Contenu public indisponible")
+         except Exception as exc:
+             return failed(exc)
++
++
++class PublishedStoryCoverAPIView(APIView):
++    """Retourne une couverture PNG uniquement depuis une release publiée vérifiée."""
++    permission_classes = [AllowAny]
++    authentication_classes = []
++
++    @published_cover_doc
++    def get(self, request, version, slug):
++        try:
++            import re
++            import json
++            import hashlib
++            from django.http import FileResponse
++            from apps.publication.models import VersionContenu
++            from apps.publication.services import _safe_release_dir, sha
++            if not re.fullmatch(r"[a-zA-Z0-9][a-zA-Z0-9._-]{0,39}", version):
++                return error(404, "NOT_FOUND", "Couverture introuvable")
++            release = VersionContenu.objects.filter(numero=version).first()
++            if not release:
++                return error(404, "NOT_FOUND", "Couverture introuvable")
++            root = _safe_release_dir(release.repertoire_snapshot)
++            manifest = json.loads((root / "manifest.json").read_text(encoding="utf-8"))
++            entries = manifest.get("files", [])
++            canonical = "\n".join(f"{e['path']}:{e['sha256']}" for e in sorted(entries, key=lambda e: e["path"]))
++            if manifest.get("version") != release.numero or sha(canonical.encode("utf-8")) != release.digest_global:
++                return error(503, "CONTENT_NOT_PUBLISHED", "Publication invalide")
++            relative = f"covers/{slug}.png"
++            entry = next((e for e in entries if e.get("path") == relative and e.get("type") == "MEDIA"), None)
++            if entry is None:
++                return error(404, "NOT_FOUND", "Couverture introuvable")
++            path = (root / relative).resolve()
++            if not path.is_relative_to(root) or not path.is_file():
++                return error(404, "NOT_FOUND", "Couverture introuvable")
++            digest = hashlib.sha256()
++            with path.open("rb") as stream:
++                for chunk in iter(lambda: stream.read(1024 * 1024), b""):
++                    digest.update(chunk)
++            if digest.hexdigest() != entry["sha256"]:
++                return error(503, "CONTENT_NOT_PUBLISHED", "Couverture publiée corrompue")
++            response = FileResponse(path.open("rb"), content_type="image/png")
++            response["Cache-Control"] = "public, max-age=86400, immutable"
++            response["X-Content-Type-Options"] = "nosniff"
++            return response
++        except Exception as exc:
++            return failed(exc)
+--- a/backend/apps/core/editor_swagger.py
++++ b/backend/apps/core/editor_swagger.py
+@@ -6,7 +6,7 @@
+ from helpers.api.swagger import ERROR_RESPONSES
+ 
+ 
+-def editor_swagger_docs(label, serializer_class, *, multipart=False, manual_parameters=None):
++def editor_swagger_docs(label, serializer_class, *, multipart=False, manual_parameters=None, partial_parameters=None):
+     """Chaque décorateur correspond à une vue distincte et à un code HTTP exact."""
+     page_serializer = type(
+         f'{label.replace(" ", "")}PageSerializer', (serializers.Serializer,), {
+@@ -45,7 +45,7 @@
+         'retrieve': decorate('Détail', 200, serializer_class),
+         'create': decorate('Création', 201, serializer_class, request_schema=input_schema, extra=form_params),
+         'update': decorate('Mise à jour complète', 200, serializer_class, request_schema=input_schema, extra=form_params),
+-        'partial': decorate('Mise à jour partielle', 200, serializer_class, request_schema=input_schema, extra=visual_form_parameters(required_fields=False) if multipart else None),
++        'partial': decorate('Mise à jour partielle', 200, serializer_class, request_schema=input_schema, extra=(partial_parameters if partial_parameters is not None else visual_form_parameters(required_fields=False)) if multipart else None),
+         'delete': decorate('Suppression', 200, deleted),
+     }
+ 
+--- a/backend/apps/publication/services.py
++++ b/backend/apps/publication/services.py
+@@ -102,6 +102,11 @@
+ def decorate_story_urls(data, manifest, request):
+     """Les *_url sont absolues et correspondent exclusivement aux assets déclarés."""
+     assets = manifest.get("assets", {})
++    cover = data.get("cover")
++    if cover and any(e.get("path") == cover and e.get("type") == "MEDIA" for e in manifest.get("files", [])):
++        data["cover_url"] = request.build_absolute_uri(reverse("story-cover", kwargs={
++            "version": manifest["version"], "slug": data["id"],
++        }))
+     visual = data.get("heroVisual")
+     if visual and visual in assets:
+         data["heroVisual_url"] = media_url(assets[visual], request)
+@@ -194,8 +199,10 @@
+                 raise ValidationError(
+                     f"{story.slug}: relectures bilingues obligatoires"
+                 )
+-        if not story.visuel_heros_id or story.visuel_heros.code not in assets:
+-            raise ValidationError(f"{story.slug}: visuel héros absent")
++        if not story.visuel_heros_id and not story.image_cover:
++            raise ValidationError(f"{story.slug}: image de couverture ou visuel héros requis")
++        if story.visuel_heros_id and story.visuel_heros.code not in assets:
++            raise ValidationError(f"{story.slug}: visuel héros invalide")
+         for node in story.noeuds.all():
+             node.full_clean()
+             if node.visuel_id and node.visuel.code not in assets:
+@@ -337,6 +344,25 @@
+                     "language": None,
+                 }
+             )
++        # Couvertures publiques figées dans le snapshot : aucune dépendance au brouillon.
++        for relative, story_data in sorted(payload.items()):
++            if not relative.startswith("stories/") or not story_data.get("cover"):
++                continue
++            story = Tantara.objects.get(slug=story_data["id"])
++            target_path = story_data["cover"]
++            if not re.fullmatch(r"covers/[a-z0-9-]+\.png", target_path):
++                raise ValidationError("Chemin de couverture invalide")
++            target = staging / target_path
++            target.parent.mkdir(parents=True, exist_ok=True)
++            digest = hashlib.sha256()
++            if not story.image_cover:
++                raise ValidationError("Couverture absente lors de la publication")
++            with story.image_cover.open("rb") as source, target.open("wb") as dest:
++                for chunk in iter(lambda: source.read(1024 * 1024), b""):
++                    dest.write(chunk)
++                    digest.update(chunk)
++            entries.append({"path": target_path, "type": "MEDIA", "sha256": digest.hexdigest(),
++                            "bytes": target.stat().st_size, "language": None})
+         # Les clips privés sont copiés dans le snapshot ; jamais un lien direct au brouillon.
+         for relative, media_asset in sorted(_studio_media_in_payload(payload).items()):
+             target = staging / relative
+--- a/backend/tests/test_editor.py
++++ b/backend/tests/test_editor.py
+@@ -134,7 +134,7 @@
+ def test_new_story_not_limited_to_three(editor):
+     s = make_story()
+     r = editor.patch(
+-        f"/api/editor/stories/{s.pk}/partial-update/", {"titre_fr": "Nouvelle histoire"}, format="json"
++        f"/api/editor/stories/{s.pk}/partial-update/", {"titre_fr": "Nouvelle histoire"}, format="multipart"
+     )
+     assert r.status_code == 200, r.data
+ 
+--- a/backend/tests/test_tantara_cover.py
++++ b/backend/tests/test_tantara_cover.py
+@@ -0,0 +1,94 @@
++"""Régression : couverture dans Tantara, multipart et drf-yasg.
++Lancer : python -m pytest tests/test_tantara_cover.py -q
++"""
++from io import BytesIO
++from tempfile import TemporaryDirectory
++
++from django.contrib.auth import get_user_model
++from django.test import TestCase, override_settings
++from django.core.files.uploadedfile import SimpleUploadedFile
++from PIL import Image
++from rest_framework.test import APIClient
++from apps.content_api.models import Tantara
++
++
++def png(name="cover.png", color="blue"):
++    stream = BytesIO()
++    Image.new("RGB", (256, 144), color).save(stream, format="PNG")
++    return SimpleUploadedFile(name, stream.getvalue(), content_type="image/png")
++
++
++def values(**extra):
++    data = dict(
++        slug="histoire-22h47", numero="93",
++        titre_fr="22:47 — Le message", sous_titre_fr="Une menace",
++        theme_fr="Chantage numérique", description_fr="Un récit fictif.",
++        avertissement_fr="Contenu sensible fictif.",
++        duree="6 min", decisions_attendues=2, palette="default",
++    )
++    data.update(extra)
++    return data
++
++
++class TantaraCoverTests(TestCase):
++    def setUp(self):
++        self.files = TemporaryDirectory()
++        self.media = override_settings(MEDIA_ROOT=self.files.name)
++        self.media.enable()
++        self.user = get_user_model().objects.create_superuser(
++            username="cover-test-admin", email="admin@invalid.example", password="long-secret-123"
++        )
++        self.client = APIClient()
++        self.client.force_login(self.user)
++
++    def tearDown(self):
++        self.media.disable()
++        self.files.cleanup()
++
++    def test_create_multipart_with_and_without_cover(self):
++        response = self.client.post("/api/editor/stories/create/", values(image_cover=png()), format="multipart")
++        self.assertEqual(response.status_code, 201, response.data)
++        self.assertIn("/media/covers/", response.data["image_cover_url"])
++        story = Tantara.objects.get(slug="histoire-22h47")
++        self.assertTrue(story.image_cover.name.endswith(".png"))
++        with Image.open(story.image_cover.path) as image:
++            self.assertEqual(image.format, "PNG")
++        self.assertEqual(self.client.get(f"/api/editor/stories/{story.pk}/").data["image_cover_url"],
++                         response.data["image_cover_url"])
++        response = self.client.post("/api/editor/stories/create/", values(slug="sans-image", numero="94"), format="multipart")
++        self.assertEqual(response.status_code, 201, response.data)
++        self.assertIsNone(response.data["image_cover_url"])
++
++    def test_replace_then_remove_cover(self):
++        response = self.client.post("/api/editor/stories/create/", values(image_cover=png()), format="multipart")
++        self.assertEqual(response.status_code, 201, response.data)
++        pk = response.data["id"]
++        response = self.client.patch(f"/api/editor/stories/{pk}/partial-update/",
++                                     {"image_cover":png("new.png", "red")}, format="multipart")
++        self.assertEqual(response.status_code, 200, response.data)
++        self.assertTrue(response.data["image_cover_url"])
++        response = self.client.patch(f"/api/editor/stories/{pk}/partial-update/",
++                                     {"effacer_couverture":"true"}, format="multipart")
++        self.assertEqual(response.status_code, 200, response.data)
++        self.assertIsNone(response.data["image_cover_url"])
++        self.assertFalse(Tantara.objects.get(pk=pk).image_cover)
++
++    def test_reject_invalid_upload_and_conflicting_options(self):
++        bad = SimpleUploadedFile("cover.png", b"not an image", content_type="image/png")
++        response = self.client.post("/api/editor/stories/create/", values(image_cover=bad), format="multipart")
++        self.assertEqual(response.status_code, 400, response.data)
++        self.assertEqual(Tantara.objects.count(), 0)
++        response = self.client.post("/api/editor/stories/create/",
++                                    values(image_cover=png(), effacer_couverture="true"), format="multipart")
++        self.assertEqual(response.status_code, 400, response.data)
++
++    def test_swagger_uses_formdata_without_request_body(self):
++        from apps.content_api.swagger import tantara_docs
++        # Les décorateurs sont générés avec la même source de paramètres pour les trois opérations.
++        from apps.content_api.swagger import tantara_form_parameters
++        fields = tantara_form_parameters(required_fields=False)
++        self.assertEqual(next(f for f in fields if f.name == "image_cover").get("type"), "file")
++        self.assertTrue(all(f.get("in") == "formData" and not f.get("required", False) for f in fields))
++        self.assertFalse(next(f for f in fields if f.name == "titre_fr").required)
++        self.assertTrue(next(f for f in tantara_form_parameters() if f.name == "titre_fr").required)
++        self.assertIn("create", tantara_docs)
+--- a/dashboard/src/pages/Overview.jsx
++++ b/dashboard/src/pages/Overview.jsx
+@@ -62,7 +62,7 @@
+     <div className="content-grid">
+       <Panel title="Tantara récents" icon={LibraryBig} action={<TextLink to="/tantara">Tout voir</TextLink>}>
+         <div className="story-list">{stories.slice(0,4).map((story, i) => <Link key={story.id} className="story-list-row" to={`/arbre?story=${encodeURIComponent(story.id)}`}>
+-          <span className={`story-art art-${i % 3}`}><BookOpen size={20}/></span>
++          <span className={`story-art art-${i % 3}`}>{story.coverUrl?<img className="story-cover-small" src={story.coverUrl} alt="" loading="lazy"/>:<BookOpen size={20}/>}</span>
+           <span className="story-info"><strong>{story.title}</strong><small>{story.theme}</small></span>
+           <Status value={story.status}/><GitBranch size={17} className="faint"/>
+         </Link>)}</div>
+--- a/dashboard/src/pages/Tantara.jsx
++++ b/dashboard/src/pages/Tantara.jsx
+@@ -1,6 +1,6 @@
+ import { useEffect, useMemo, useState } from 'react';
+ import { useNavigate, useSearchParams } from 'react-router-dom';
+-import { BookOpen, Eye, GitBranch, Pencil, Plus, RefreshCw, Search, Trash2 } from 'lucide-react';
++import { BookOpen, Eye, GitBranch, ImagePlus, Pencil, Plus, RefreshCw, Search, Trash2, X } from 'lucide-react';
+ import { Dialog, EmptyState, Field, Panel, StatCard, Status } from '../components/UI';
+ import { useAdmin } from '../lib/store';
+ import { translationApi } from '../services/editor';
+@@ -22,17 +22,42 @@
+   const [modal,setModal]=useState(null);
+   const [form,setForm]=useState(empty);
+   const [minutes,setMinutes]=useState(5);
++  const [coverFile,setCoverFile]=useState(null);
++  const [removeCover,setRemoveCover]=useState(false);
++  const [coverBlobUrl,setCoverBlobUrl]=useState('');
++  useEffect(()=>{
++    if(!coverFile){setCoverBlobUrl('');return;}
++    const url=URL.createObjectURL(coverFile);
++    setCoverBlobUrl(url);
++    return ()=>URL.revokeObjectURL(url);
++  },[coverFile]);
++  const coverPreview=coverBlobUrl || (!removeCover ? modal?.coverUrl : null);
++  const setNewCover=file=>{
++    setActionError('');
++    if(!file){setCoverFile(null);return;}
++    if(!['image/png','image/jpeg','image/webp'].includes(file.type)){
++      setCoverFile(null);setActionError('Format non accepté : PNG, JPEG ou WebP uniquement.');return;
++    }
++    if(file.size===0 || file.size>5*1024*1024){
++      setCoverFile(null);setActionError('La couverture doit être comprise entre 1 octet et 5 Mo.');return;
++    }
++    setRemoveCover(false);
++    setCoverFile(file);
++  };
++
+   const [actionError,setActionError]=useState('');
+   useEffect(()=>setSearch(params.get('q')||''),[params]);
+   const filtered=useMemo(()=>stories.filter(s=>(status==='all'||s.status===status) && `${s.title} ${s.titleMg} ${s.theme}`.toLowerCase().includes(search.toLowerCase())),[stories,search,status]);
+-  const create=()=>{setActionError('');setMinutes(5);setForm({...empty,numero:nextNumber(stories)});setModal({mode:'create'})};
+-  const edit=s=>{setActionError('');setMinutes(toMinutes(s.duree));setForm(Object.fromEntries(Object.keys(empty).map(k=>[k,s[k] ?? empty[k]])));setModal({mode:'edit',id:s.id})};
++  const create=()=>{setActionError('');setCoverFile(null);setRemoveCover(false);setMinutes(5);setForm({...empty,numero:nextNumber(stories)});setModal({mode:'create'})};
++  const edit=s=>{setActionError('');setCoverFile(null);setRemoveCover(false);setMinutes(toMinutes(s.duree));setForm(Object.fromEntries(Object.keys(empty).map(k=>[k,s[k] ?? empty[k]])));setModal({mode:'edit',id:s.id,coverUrl:s.coverUrl||null})};
+   const save=async e=>{
+     e.preventDefault();setActionError('');
+     const payload={...form,duree:`${minutes} min`,decisions_attendues:Number(form.decisions_attendues),ordre:Number(form.ordre)};
+     if(!Number.isInteger(Number(minutes)) || Number(minutes)<1 || Number(minutes)>180){setActionError('Saisis une durée entre 1 et 180 minutes.');return}
+     if(modal.mode==='create' && (!payload.slug || !payload.numero)) {setActionError('Un slug et un numéro uniques sont nécessaires.');return}
+-    try{if(modal.mode==='edit') await updateStory(modal.id,payload);else await addStory(payload);setModal(null)}
++    if(coverFile)payload.image_cover=coverFile;
++    if(removeCover && modal.mode==='edit')payload.effacer_couverture=true;
++    try{if(modal.mode==='edit') await updateStory(modal.id,payload);else await addStory(payload);setModal(null);setCoverFile(null);setRemoveCover(false)}
+     catch(err){setActionError(err.message)}
+   };
+   const del=async s=>{if(!window.confirm(`Supprimer définitivement « ${s.title} » et ses nœuds associés ?`))return;try{await removeStory(s.id)}catch(err){alert(err.message)}};
+@@ -48,7 +73,7 @@
+       <div className="table-toolbar"><label className="search-control"><Search size={16}/><input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Chercher un Tantara…"/></label>
+         <div className="filter-tabs">{[['all','Tous'],['published','Publiés'],['draft','Brouillons'],['review','À relire']].map(([v,t])=><button key={v} className={`filter-tab ${status===v?'selected':''}`} onClick={()=>setStatus(v)}>{t}</button>)}</div></div>
+       {filtered.length?<div className="data-table-wrap"><table className="data-table"><thead><tr><th>Tantara</th><th>Thème</th><th>Révision</th><th>Traduction</th><th>Statut</th><th>Actions</th></tr></thead><tbody>
+-        {filtered.map(s=><tr key={s.id}><td><strong>{s.title}</strong><small>{s.titre_mg || s.slug}</small></td><td>{s.theme}</td><td>{s.revision || '1.0'}</td><td><span className={`translation-status translation-${s.translation_state?.state||'NONE'}`}>{({PENDING:'En file',FAILED:'Erreur',REVIEW_REQUIRED:'À relire',NONE:'—'})[s.translation_state?.state||'NONE']}</span></td><td><Status value={s.status}/></td><td><div className="table-actions">{s.translation_state?.state==='FAILED'&&<button title="Relancer la traduction MG" onClick={async()=>{try{await perform(()=>translationApi.retry('content_api.Tantara',s.id))}catch(e){alert(e.message)}}}><RefreshCw size={16}/></button>}<button title="Éditer les détails" onClick={()=>edit(s)}><Pencil size={16}/></button><button title="Éditer l’arbre" onClick={()=>navigate(`/arbre?story=${encodeURIComponent(s.id)}`)}><GitBranch size={16}/></button><button title="Supprimer" onClick={()=>del(s)}><Trash2 size={16}/></button></div></td></tr>)}
++        {filtered.map(s=><tr key={s.id}><td><div className="story-table-identity">{s.coverUrl?<img className="story-cover-thumb" src={s.coverUrl} alt="" loading="lazy"/>:<span className="story-cover-thumb story-cover-placeholder"><BookOpen size={20}/></span>}<span><strong>{s.title}</strong><small>{s.titre_mg || s.slug}</small></span></div></td><td>{s.theme}</td><td>{s.revision || '1.0'}</td><td><span className={`translation-status translation-${s.translation_state?.state||'NONE'}`}>{({PENDING:'En file',FAILED:'Erreur',REVIEW_REQUIRED:'À relire',NONE:'—'})[s.translation_state?.state||'NONE']}</span></td><td><Status value={s.status}/></td><td><div className="table-actions">{s.translation_state?.state==='FAILED'&&<button title="Relancer la traduction MG" onClick={async()=>{try{await perform(()=>translationApi.retry('content_api.Tantara',s.id))}catch(e){alert(e.message)}}}><RefreshCw size={16}/></button>}<button title="Éditer les détails" onClick={()=>edit(s)}><Pencil size={16}/></button><button title="Éditer l’arbre" onClick={()=>navigate(`/arbre?story=${encodeURIComponent(s.id)}`)}><GitBranch size={16}/></button><button title="Supprimer" onClick={()=>del(s)}><Trash2 size={16}/></button></div></td></tr>)}
+       </tbody></table></div>:<EmptyState title="Aucune histoire" description="Ajoutez un Tantara ou modifiez les filtres."/>}
+       <div className="table-footer">Contenus enregistrés sur Django · aucune progression de joueur collectée</div>
+     </Panel>
+@@ -56,6 +81,20 @@
+       <p className="form-hint">Rédige en français. Le backend génère les traductions malgaches en arrière-plan ; elles doivent être relues avant publication.</p>
+       <div className="form-two"><Field label="Identifiant (slug)" required><input value={form.slug} required maxLength={40} onChange={e=>setForm(p=>({...p,slug:slug(e.target.value)}))}/></Field><Field label="Numéro (01–99)" required><input required maxLength={2} pattern="[0-9]{2}" value={form.numero} onChange={e=>setForm(p=>({...p,numero:e.target.value}))}/></Field></div>
+       {fields.map(([key,label])=><Field key={key} label={label} required>{['description','avertissement'].includes(key)?<textarea required rows={2} value={form[`${key}_fr`]} onChange={e=>setForm(p=>({...p,[`${key}_fr`]:e.target.value}))}/>:<input required value={form[`${key}_fr`]} onChange={e=>setForm(p=>({...p,[`${key}_fr`]:e.target.value,...(key==='titre'&&modal.mode==='create'&&!p.slug?{slug:slug(e.target.value)}:{})}))}/>}</Field>)}
++      <Field label="Image de couverture (facultatif)">
++        <div className="cover-picker">
++          <div className="cover-visual">
++            {coverPreview ? <img src={coverPreview} alt="Aperçu de la couverture"/> : <div className="cover-no-image"><ImagePlus size={30}/><span>Aucune couverture</span></div>}
++          </div>
++          <div className="cover-controls">
++            <label className="cover-file-label"><ImagePlus size={16}/>{coverPreview ? 'Remplacer l’image' : 'Choisir une image'}
++              <input type="file" accept="image/png,image/jpeg,image/webp" onChange={e=>{setNewCover(e.target.files?.[0]||null);e.target.value='';}}/>
++            </label>
++            {coverPreview && <button className="btn btn-outline" type="button" onClick={()=>{setCoverFile(null);setRemoveCover(true)}}><X size={15}/> Retirer</button>}
++            <small>PNG, JPEG, WebP · 5 Mo max. · format conseillé 16:9. Illustration fictive, sans données personnelles.</small>
++          </div>
++        </div>
++      </Field>
+       <div className="form-two"><Field label="Durée indicative" required><div className="number-with-unit"><input required type="number" inputMode="numeric" min="1" max="180" step="1" value={minutes} onChange={e=>setMinutes(e.target.value===''?'':Number(e.target.value))}/><span>minutes</span></div></Field><Field label="Décisions par parcours" required><input required type="number" min="1" max="30" step="1" value={form.decisions_attendues} onChange={e=>setForm(p=>({...p,decisions_attendues:e.target.value}))}/></Field></div>
+       {actionError&&<p role="alert" className="api-error">{actionError}</p>}
+       <div className="form-actions"><button type="button" className="btn btn-outline" onClick={()=>setModal(null)}>Annuler</button><button disabled={busy} className="btn btn-primary">{busy?'Enregistrement…':'Enregistrer'}</button></div>
+--- a/dashboard/src/services/editor.js
++++ b/dashboard/src/services/editor.js
+@@ -16,8 +16,8 @@
+ 
+ export const storyApi = {
+   list: () => allPages(`${editor}/stories/`),
+-  create: data => api.post(`${editor}/stories/create/`, data),
+-  update: (id, data) => api.patch(`${editor}/stories/${id}/partial-update/`, data),
++  create: data => api.post(`${editor}/stories/create/`, storyFormData(data)),
++  update: (id, data) => api.patch(`${editor}/stories/${id}/partial-update/`, storyFormData(data)),
+   delete: id => api.delete(`${editor}/stories/${id}/delete/`),
+   nodes: () => allPages(`${editor}/nodes/`),
+   options: () => allPages(`${editor}/options/`),
+@@ -62,6 +62,7 @@
+ export function normalizeStory(s) {
+   return { ...s, title:s.titre_fr, titleMg:s.titre_mg, theme:s.theme_fr,
+     themeMg:s.theme_mg, updatedAt:s.updated_at, language:'FR / MG',
++    coverUrl: (()=>{ const url=s.image_cover_url; if(!url) return null; try {const parsed=new URL(url,window.location.origin);return parsed.pathname.startsWith('/media/') ? parsed.pathname+parsed.search : url;}catch{return url;} })(),
+     status:({BROUILLON:'draft',A_CORRIGER:'draft',EN_RELECTURE:'review',APPROUVE:'ready',PUBLIE:'published',ARCHIVE:'draft'})[s.statut_editorial] || 'draft' };
+ }
+ export function normalizeResource(r) {
+@@ -69,3 +70,18 @@
+     type:({INTERNAL:'Conseil',EXTERNAL:'Lien externe',CALL:'Téléphone'})[r.kind]||r.kind,
+     url:r.href, status:r.statut_service==='ACTIVE'?'ready':'draft' };
+ }
++
++/** Multipart for Tantara: Axios/browser choose the boundary automatically. */
++export function storyFormData(values) {
++  const form = new FormData();
++  for (const [key, value] of Object.entries(values)) {
++    if (value === null || value === undefined || value === '' || key === 'image_cover_url') continue;
++    if (key === 'image_cover') {
++      if (value instanceof File) form.append(key, value);
++      continue;
++    }
++    if (Array.isArray(value)) value.forEach(item => form.append(key, String(item)));
++    else form.append(key, String(value));
++  }
++  return form;
++}
+--- a/dashboard/src/styles/app.css
++++ b/dashboard/src/styles/app.css
+@@ -479,3 +479,22 @@
+ .status-published, .status-ready {background:#17232c;border-color:#3b6c8a;color:#9addff;}
+ .status-review, .status-draft {background:#272018;border-color:#6a5136;color:var(--amber);}
+ option {background:#141419;color:#f0f0f5;}
++
++
++/* Couvertures Tantara — composants dans la même palette noire/violet/bleu. */
++.story-table-identity{display:flex;align-items:center;gap:11px;min-width:210px}
++.story-table-identity>span:last-child{min-width:0}
++.story-cover-thumb{height:48px;width:78px;flex:0 0 78px;object-fit:cover;background:#111117;border:1px solid #363548;clip-path:polygon(0 0,calc(100% - 10px) 0,100% 10px,100% 100%,0 100%)}
++.story-cover-placeholder{display:grid;place-items:center;color:#a1a1bf}
++.story-art{overflow:hidden}
++.story-cover-small{width:100%;height:100%;display:block;object-fit:cover}
++.cover-picker{display:grid;grid-template-columns:minmax(160px,45%) minmax(0,1fr);gap:16px;border:1px solid #373642;background:#0d0d11;padding:12px;align-items:center}
++.cover-visual{width:100%;aspect-ratio:16/9;background:#15151c;overflow:hidden;clip-path:polygon(0 0,calc(100% - 12px) 0,100% 12px,100% 100%,0 100%);border:1px solid #444056}
++.cover-visual img{width:100%;height:100%;object-fit:cover;display:block}
++.cover-no-image{height:100%;display:flex;flex-direction:column;gap:8px;align-items:center;justify-content:center;color:#88889e;font-size:11px}
++.cover-controls{min-width:0;display:flex;flex-direction:column;align-items:start;gap:10px}
++.cover-controls small{font-size:10px;line-height:1.6;color:var(--muted)}
++.cover-file-label{position:relative;min-height:36px;padding:9px 12px;display:inline-flex;align-items:center;gap:8px;border:1px solid #6c55a6;color:#e4d9ff;background:#231c34;cursor:pointer;font-size:11px;font-weight:700}
++.cover-file-label:hover{border-color:var(--purple);background:#2b2040}
++.cover-file-label input{position:absolute;inset:0;width:100%;height:100%;opacity:0;cursor:pointer}
++@media(max-width:530px){.cover-picker{grid-template-columns:1fr}.story-cover-thumb{width:60px;flex-basis:60px;height:42px}}

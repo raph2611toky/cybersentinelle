@@ -6,7 +6,7 @@ from rest_framework import serializers
 from helpers.api.swagger import ERROR_RESPONSES
 
 
-def editor_swagger_docs(label, serializer_class, *, multipart=False, manual_parameters=None):
+def editor_swagger_docs(label, serializer_class, *, multipart=False, manual_parameters=None, partial_parameters=None):
     """Chaque décorateur correspond à une vue distincte et à un code HTTP exact."""
     page_serializer = type(
         f'{label.replace(" ", "")}PageSerializer', (serializers.Serializer,), {
@@ -45,7 +45,7 @@ def editor_swagger_docs(label, serializer_class, *, multipart=False, manual_para
         'retrieve': decorate('Détail', 200, serializer_class),
         'create': decorate('Création', 201, serializer_class, request_schema=input_schema, extra=form_params),
         'update': decorate('Mise à jour complète', 200, serializer_class, request_schema=input_schema, extra=form_params),
-        'partial': decorate('Mise à jour partielle', 200, serializer_class, request_schema=input_schema, extra=visual_form_parameters(required_fields=False) if multipart else None),
+        'partial': decorate('Mise à jour partielle', 200, serializer_class, request_schema=input_schema, extra=(partial_parameters if partial_parameters is not None else visual_form_parameters(required_fields=False)) if multipart else None),
         'delete': decorate('Suppression', 200, deleted),
     }
 

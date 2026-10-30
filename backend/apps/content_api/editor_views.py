@@ -168,6 +168,7 @@ class TantaraDetailView(APIView):
 
 class TantaraCreateView(APIView):
     permission_classes = [IsAdminUser]
+    parser_classes = [MultiPartParser, FormParser]
 
     @tantara_docs["create"]
     def post(self, request):
@@ -179,6 +180,7 @@ class TantaraCreateView(APIView):
 
 class TantaraUpdateView(APIView):
     permission_classes = [IsAdminUser]
+    parser_classes = [MultiPartParser, FormParser]
 
     @tantara_docs["update"]
     def put(self, request, pk):
@@ -190,6 +192,7 @@ class TantaraUpdateView(APIView):
 
 class TantaraPartialUpdateView(APIView):
     permission_classes = [IsAdminUser]
+    parser_classes = [MultiPartParser, FormParser]
 
     @tantara_docs["partial"]
     def patch(self, request, pk):

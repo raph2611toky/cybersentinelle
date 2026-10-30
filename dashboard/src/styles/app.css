@@ -479,3 +479,22 @@ body, .app-shell, .auth-shell { background-color:var(--bg); }
 .status-published, .status-ready {background:#17232c;border-color:#3b6c8a;color:#9addff;}
 .status-review, .status-draft {background:#272018;border-color:#6a5136;color:var(--amber);}
 option {background:#141419;color:#f0f0f5;}
+
+
+/* Couvertures Tantara — composants dans la même palette noire/violet/bleu. */
+.story-table-identity{display:flex;align-items:center;gap:11px;min-width:210px}
+.story-table-identity>span:last-child{min-width:0}
+.story-cover-thumb{height:48px;width:78px;flex:0 0 78px;object-fit:cover;background:#111117;border:1px solid #363548;clip-path:polygon(0 0,calc(100% - 10px) 0,100% 10px,100% 100%,0 100%)}
+.story-cover-placeholder{display:grid;place-items:center;color:#a1a1bf}
+.story-art{overflow:hidden}
+.story-cover-small{width:100%;height:100%;display:block;object-fit:cover}
+.cover-picker{display:grid;grid-template-columns:minmax(160px,45%) minmax(0,1fr);gap:16px;border:1px solid #373642;background:#0d0d11;padding:12px;align-items:center}
+.cover-visual{width:100%;aspect-ratio:16/9;background:#15151c;overflow:hidden;clip-path:polygon(0 0,calc(100% - 12px) 0,100% 12px,100% 100%,0 100%);border:1px solid #444056}
+.cover-visual img{width:100%;height:100%;object-fit:cover;display:block}
+.cover-no-image{height:100%;display:flex;flex-direction:column;gap:8px;align-items:center;justify-content:center;color:#88889e;font-size:11px}
+.cover-controls{min-width:0;display:flex;flex-direction:column;align-items:start;gap:10px}
+.cover-controls small{font-size:10px;line-height:1.6;color:var(--muted)}
+.cover-file-label{position:relative;min-height:36px;padding:9px 12px;display:inline-flex;align-items:center;gap:8px;border:1px solid #6c55a6;color:#e4d9ff;background:#231c34;cursor:pointer;font-size:11px;font-weight:700}
+.cover-file-label:hover{border-color:var(--purple);background:#2b2040}
+.cover-file-label input{position:absolute;inset:0;width:100%;height:100%;opacity:0;cursor:pointer}
+@media(max-width:530px){.cover-picker{grid-template-columns:1fr}.story-cover-thumb{width:60px;flex-basis:60px;height:42px}}

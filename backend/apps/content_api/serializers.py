@@ -66,6 +66,7 @@ def story_dict(s, request, include_nodes=False):
         "expectedDecisions": s.decisions_attendues,
         "palette": s.palette,
         "heroVisual": s.visuel_heros.code if s.visuel_heros else "",
+        "cover": f"covers/{s.slug}.png" if s.image_cover else "",
     }
     if s.visuel_heros and request:
         data["heroVisual_url"] = absolute_static_url(request, s.visuel_heros)
@@ -86,6 +87,8 @@ class StoryListSerializer(serializers.Serializer):
     expectedDecisions = serializers.IntegerField()
     palette = serializers.CharField()
     heroVisual = serializers.CharField()
+    cover = serializers.CharField(required=False, allow_blank=True)
+    cover_url = serializers.URLField(required=False)
     heroVisual_url = serializers.URLField(required=False)
 
 
@@ -183,6 +186,37 @@ class VisuelEditorSerializer(FrenchFirstMixin,ValidatedModelSerializer):
 
 
 class TantaraEditorSerializer(FrenchFirstMixin, ValidatedModelSerializer):
+    image_cover_url = serializers.SerializerMethodField(read_only=True)
+    effacer_couverture = serializers.BooleanField(write_only=True, required=False, default=False)
+
+    def get_image_cover_url(self, obj):
+        if not obj.image_cover:
+            return None
+        url = obj.image_cover.url
+        request = self.context.get("request")
+        return request.build_absolute_uri(url) if request else url
+
+    def validate_image_cover(self, upload):
+        if upload is None:
+            return None
+        from helpers.helper import normalize_image
+        from django.core.exceptions import ValidationError as DjangoValidationError
+        try:
+            clean = normalize_image(upload)  # PNG réencodé, sans métadonnées d'origine.
+        except DjangoValidationError as exc:
+            raise serializers.ValidationError(exc.messages) from exc
+        if clean.size > 5 * 1024 * 1024:
+            raise serializers.ValidationError("Image réencodée limitée à 5 Mo.")
+        return clean
+
+    def validate(self, attrs):
+        clear = attrs.pop("effacer_couverture", False)
+        if clear and attrs.get("image_cover") is not None:
+            raise serializers.ValidationError({"image_cover": "Ne pas envoyer une image et demander son retrait simultanément."})
+        if clear:
+            attrs["image_cover"] = None
+        return super().validate(attrs)
+
     def validate_duree(self, value):
         import re
         match = re.fullmatch(r'([1-9][0-9]{0,2}) min', value.strip())
@@ -235,6 +269,9 @@ class TantaraEditorSerializer(FrenchFirstMixin, ValidatedModelSerializer):
             "avertissement_fr",
             "avertissement_mg",
             "duree",
+            "image_cover",
+            "image_cover_url",
+            "effacer_couverture",
             "decisions_attendues",
             "palette",
             "visuel_heros",
@@ -244,7 +281,7 @@ class TantaraEditorSerializer(FrenchFirstMixin, ValidatedModelSerializer):
             "visuel_heros_detail",
             "sujets_details",
         )
-        read_only_fields = ("id", "created_at", "updated_at", "publie_le")
+        read_only_fields = ("id", "created_at", "updated_at", "publie_le", "image_cover_url")
 
 
 class NoeudEditorSerializer(FrenchFirstMixin, ValidatedModelSerializer):

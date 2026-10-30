@@ -62,7 +62,7 @@ export default function Overview() {
     <div className="content-grid">
       <Panel title="Tantara récents" icon={LibraryBig} action={<TextLink to="/tantara">Tout voir</TextLink>}>
         <div className="story-list">{stories.slice(0,4).map((story, i) => <Link key={story.id} className="story-list-row" to={`/arbre?story=${encodeURIComponent(story.id)}`}>
-          <span className={`story-art art-${i % 3}`}><BookOpen size={20}/></span>
+          <span className={`story-art art-${i % 3}`}>{story.coverUrl?<img className="story-cover-small" src={story.coverUrl} alt="" loading="lazy"/>:<BookOpen size={20}/>}</span>
           <span className="story-info"><strong>{story.title}</strong><small>{story.theme}</small></span>
           <Status value={story.status}/><GitBranch size={17} className="faint"/>
         </Link>)}</div>

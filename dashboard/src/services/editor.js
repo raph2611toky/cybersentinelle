@@ -16,8 +16,8 @@ export const translationApi = {
 
 export const storyApi = {
   list: () => allPages(`${editor}/stories/`),
-  create: data => api.post(`${editor}/stories/create/`, data),
-  update: (id, data) => api.patch(`${editor}/stories/${id}/partial-update/`, data),
+  create: data => api.post(`${editor}/stories/create/`, storyFormData(data)),
+  update: (id, data) => api.patch(`${editor}/stories/${id}/partial-update/`, storyFormData(data)),
   delete: id => api.delete(`${editor}/stories/${id}/delete/`),
   nodes: () => allPages(`${editor}/nodes/`),
   options: () => allPages(`${editor}/options/`),
@@ -62,10 +62,26 @@ export const publicationApi = {
 export function normalizeStory(s) {
   return { ...s, title:s.titre_fr, titleMg:s.titre_mg, theme:s.theme_fr,
     themeMg:s.theme_mg, updatedAt:s.updated_at, language:'FR / MG',
+    coverUrl: (()=>{ const url=s.image_cover_url; if(!url) return null; try {const parsed=new URL(url,window.location.origin);return parsed.pathname.startsWith('/media/') ? parsed.pathname+parsed.search : url;}catch{return url;} })(),
     status:({BROUILLON:'draft',A_CORRIGER:'draft',EN_RELECTURE:'review',APPROUVE:'ready',PUBLIE:'published',ARCHIVE:'draft'})[s.statut_editorial] || 'draft' };
 }
 export function normalizeResource(r) {
   return { ...r, title:r.titre_fr, titleMg:r.titre_mg,
     type:({INTERNAL:'Conseil',EXTERNAL:'Lien externe',CALL:'Téléphone'})[r.kind]||r.kind,
     url:r.href, status:r.statut_service==='ACTIVE'?'ready':'draft' };
+}
+
+/** Multipart for Tantara: Axios/browser choose the boundary automatically. */
+export function storyFormData(values) {
+  const form = new FormData();
+  for (const [key, value] of Object.entries(values)) {
+    if (value === null || value === undefined || value === '' || key === 'image_cover_url') continue;
+    if (key === 'image_cover') {
+      if (value instanceof File) form.append(key, value);
+      continue;
+    }
+    if (Array.isArray(value)) value.forEach(item => form.append(key, String(item)));
+    else form.append(key, String(value));
+  }
+  return form;
 }

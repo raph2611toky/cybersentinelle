@@ -89,6 +89,8 @@ class Tantara(ContenuEditorial):
     avertissement_fr = models.TextField()
     avertissement_mg = models.TextField()
     duree = models.CharField(max_length=40)
+    # Couverture éditoriale indépendante du visuel héros existant.
+    image_cover = models.ImageField(upload_to="covers/%Y/%m/", null=True, blank=True)
     decisions_attendues = models.PositiveSmallIntegerField()
     palette = models.SlugField(max_length=60)
     visuel_heros = models.ForeignKey(

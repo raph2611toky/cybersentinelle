@@ -134,7 +134,7 @@ def make_story(slug="new-story", numero="04"):
 def test_new_story_not_limited_to_three(editor):
     s = make_story()
     r = editor.patch(
-        f"/api/editor/stories/{s.pk}/partial-update/", {"titre_fr": "Nouvelle histoire"}, format="json"
+        f"/api/editor/stories/{s.pk}/partial-update/", {"titre_fr": "Nouvelle histoire"}, format="multipart"
     )
     assert r.status_code == 200, r.data
 

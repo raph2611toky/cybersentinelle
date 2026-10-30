@@ -23,6 +23,7 @@ class VisuelAdmin(admin.ModelAdmin):
 @admin.register(Tantara)
 class TantaraAdmin(admin.ModelAdmin):
     list_display = ("slug", "numero", "titre_fr", "statut_editorial", "updated_at")
+    fields = ("slug", "numero", "titre_fr", "titre_mg", "sous_titre_fr", "sous_titre_mg", "theme_fr", "theme_mg", "description_fr", "description_mg", "avertissement_fr", "avertissement_mg", "duree", "decisions_attendues", "palette", "image_cover", "visuel_heros", "sujets", "ordre", "revision", "statut_editorial", "valide_le", "validateur_role", "relecture_fr_le", "relecture_mg_le", "relecteur_fr_role", "relecteur_mg_role", "note_validation")
     search_fields = ("slug", "numero", "titre_fr")
     list_filter = ("statut_editorial",)
     readonly_fields = ("id", "created_at", "updated_at")

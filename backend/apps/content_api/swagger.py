@@ -58,6 +58,8 @@ properties = {
     "expectedDecisions": openapi.Schema(type=openapi.TYPE_INTEGER),
     "palette": str_field(),
     "heroVisual": str_field(),
+    "cover": str_field("Chemin versionné de la couverture publiée"),
+    "cover_url": str_field("URL publique de la couverture publiée (si disponible)"),
     "heroVisual_url": str_field("URL absolue si fichier présent"),
 }
 required = [
@@ -86,7 +88,7 @@ story_detail = openapi.Schema(
 )
 story_list_doc = swagger_auto_schema(
     tags=["Tantara"],
-    operation_summary="Liste des trois Tantara",
+    operation_summary="Liste des Tantara publiés",
     operation_description="GET sans identité, réponses bilingues. HEAD et OPTIONS également supportés.",
     responses={
         200: openapi.Response(
@@ -101,7 +103,7 @@ story_list_doc = swagger_auto_schema(
 story_detail_doc = swagger_auto_schema(
     tags=["Tantara"],
     operation_summary="Graphe narratif complet",
-    operation_description="Slug limité à aza-zaraina, tsy-irery et aza-manaiky.",
+    operation_description="Slug public d’un Tantara présent dans la release active.",
     responses={
         200: openapi.Response("Récit intégral", story_detail),
         304: openapi.Response("ETag non modifié (sans corps)"),
@@ -118,8 +120,60 @@ sujet_docs = editor_swagger_docs("Sujet", SujetEditorSerializer)
 
 visuel_docs = editor_swagger_docs("Visuel", VisuelEditorSerializer, multipart=True, manual_parameters=visual_form_parameters())
 
-tantara_docs = editor_swagger_docs("Tantara", TantaraEditorSerializer)
+def tantara_form_parameters(*, required_fields=True):
+    """Swagger 2.0 multipart : manuel, sans request_body (fichier dans formData)."""
+    fields = [
+        ("slug", openapi.TYPE_STRING), ("numero", openapi.TYPE_STRING),
+        ("titre_fr", openapi.TYPE_STRING), ("sous_titre_fr", openapi.TYPE_STRING),
+        ("theme_fr", openapi.TYPE_STRING), ("description_fr", openapi.TYPE_STRING),
+        ("avertissement_fr", openapi.TYPE_STRING),
+        ("duree", openapi.TYPE_STRING), ("decisions_attendues", openapi.TYPE_INTEGER),
+        ("palette", openapi.TYPE_STRING), ("ordre", openapi.TYPE_INTEGER),
+        ("image_cover", openapi.TYPE_FILE), ("effacer_couverture", openapi.TYPE_BOOLEAN),
+        ("visuel_heros", openapi.TYPE_STRING),
+        ("revision", openapi.TYPE_STRING),
+        ("statut_editorial", openapi.TYPE_STRING),
+        ("valide_le", openapi.TYPE_STRING),
+        ("validateur_role", openapi.TYPE_STRING),
+        ("relecture_fr_le", openapi.TYPE_STRING),
+        ("relecture_mg_le", openapi.TYPE_STRING),
+        ("relecteur_fr_role", openapi.TYPE_STRING),
+        ("relecteur_mg_role", openapi.TYPE_STRING),
+        ("note_validation", openapi.TYPE_STRING),
+    ]
+    mandatory = {
+        "slug", "numero", "titre_fr", "sous_titre_fr", "theme_fr",
+        "description_fr", "avertissement_fr", "duree", "decisions_attendues", "palette"
+    } if required_fields else set()
+    return [
+        openapi.Parameter(
+            name, openapi.IN_FORM, type=kind, required=name in mandatory,
+            description=(
+                "Couverture facultative PNG/JPEG/WebP, max. 5 Mo ; réencodée en PNG."
+                if name == "image_cover" else
+                "true pour supprimer la couverture actuelle (exclusif de image_cover)."
+                if name == "effacer_couverture" else
+                "Durée au format « 6 min »." if name == "duree" else
+                "Texte source FR : traduction MG en file d'attente." if name.endswith("_fr") else
+                "Champ du formulaire Tantara."
+            ),
+        ) for name, kind in fields
+    ]
+
+
+tantara_docs = editor_swagger_docs(
+    "Tantara", TantaraEditorSerializer, multipart=True,
+    manual_parameters=tantara_form_parameters(),
+    partial_parameters=tantara_form_parameters(required_fields=False),
+)
 
 noeud_docs = editor_swagger_docs("Noeud", NoeudEditorSerializer)
 
 optiondecision_docs = editor_swagger_docs("OptionDecision", OptionDecisionEditorSerializer)
+
+
+published_cover_doc = swagger_auto_schema(
+    tags=["Tantara"],
+    operation_summary="Couverture PNG d'une release publiée",
+    responses={200: openapi.Response("Image PNG versionnée"), 404: "Introuvable", 503: "Release invalide"},
+)
