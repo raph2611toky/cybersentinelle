@@ -3,7 +3,7 @@
 from drf_yasg import openapi
 from drf_yasg.utils import swagger_auto_schema
 from rest_framework import serializers
-from config.swagger import ERROR_RESPONSES
+from helpers.api.swagger import ERROR_RESPONSES
 
 
 def editor_swagger_docs(label, serializer_class, *, multipart=False, manual_parameters=None):

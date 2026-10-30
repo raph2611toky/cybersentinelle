@@ -19,7 +19,7 @@ python manage.py runserver 127.0.0.1:8000
 La commande demande et valide le mot de passe. Aucun compte ni secret partagé n'est inclus. `python manage.py createsuperuser` reste utilisable. En automatisation, `bootstrap_admin --no-input` lit `DJANGO_SUPERUSER_PASSWORD` depuis l'environnement ; cette variable ne doit pas être conservée dans le dépôt. Un compte existant n'est jamais écrasé.
 
 - Administration : http://127.0.0.1:8000/admin/
-- Swagger, après connexion staff : http://127.0.0.1:8000/api/docs/
+- Swagger, après mot de passe dédié (`SWAGGER_PASSWORD`) : http://127.0.0.1:8000/api/docs/
 - ReDoc : http://127.0.0.1:8000/api/redoc/
 - Schéma JSON : http://127.0.0.1:8000/api/swagger.json
 
@@ -30,7 +30,9 @@ La base initiale ne contient pas les vraies histoires ni leurs illustrations : e
 | Chemin | Responsabilité |
 |---|---|
 | `config/settings.py` | Base de données, sessions, CSRF, CORS, médias, Swagger |
-| `config/editor_urls.py` | Routes APIView explicites, aucun routeur ni ViewSet |
+| `apps/editor/urls.py` | Routes APIView éditoriales, incluses par `config/urls.py` |
+| `config/views.py` | Vues transversales (health / accès Swagger), sans ViewSet |
+| `helpers/api/` | Swagger, exceptions, réponses, middleware et mot de passe séparés |
 | `apps/core/` | Langues, permissions, réponses JSON, services CRUD communs et Swagger |
 | `apps/content_api/` | Sujets, illustrations, histoires, nœuds, options |
 | `apps/resources/` | Sources et ressources d'aide |
@@ -50,7 +52,7 @@ Chaque application métier possède son `admin.py` (nom reconnu par Django), ses
 | `/api/v1/` | Lecture publique de snapshots validés ; aucune écriture |
 | `/api/editor/` | Compte actif, `is_staff=True`, permission Django par modèle et opération |
 | `/admin/` | Connexion Django ; permissions par modèle |
-| Documentation | Connexion staff requise, même en développement |
+| Documentation | Mot de passe Swagger indépendant, même en développement |
 
 Un compte authentifié sans `is_staff` ne peut pas éditer. Un membre staff sans permission ne peut pas consulter les données éditoriales. Dans l'admin, créer des groupes puis attribuer `view`, `add`, `change`, `delete` selon les besoins. Les superutilisateurs ont tous les droits.
 
@@ -101,7 +103,7 @@ L'importeur `import_public_content` conserve son format historique V14 (trois hi
 
 ## Administration, CSRF et frontend
 
-Les APIView de l’éditeur nécessitent **deux conditions indépendantes** : compte staff authentifié en session Django et permission `view/add/change/delete` du modèle. Pour tester Swagger, se connecter sur `/admin/login/`, puis fournir le cookie `csrftoken` comme en-tête `X-CSRFToken` lors des écritures. Ce mécanisme ne concerne pas la navigation publique.
+Les APIView de l’éditeur nécessitent **deux conditions indépendantes** : compte staff authentifié en session Django et permission `view/add/change/delete` du modèle. Pour ouvrir Swagger, utiliser le mot de passe spécifique défini dans `SWAGGER_PASSWORD`. Ce mot de passe ne permet pas de modifier les contenus : les endpoints `/api/editor/` exigent encore une session Django staff et un `X-CSRFToken` pour les écritures. Ce mécanisme ne concerne pas la navigation publique.
 
 Conformément au cahier des charges concours, la route `/api/session/` a été supprimée : le navigateur joue les Tantara sans compte, session applicative, progression serveur ni cookie de joueur. Le frontend utilise seulement `GET /api/v1/` ; les requêtes CORS cross-origin n’autorisent aucun envoi de cookie (`CORS_ALLOW_CREDENTIALS=False`). Les sessions Django restent nécessaires à l’administration privée.
 
@@ -144,3 +146,7 @@ Les tests sont prévus pour SQLite. Le parcours de publication et restauration, 
 En production : `DEBUG=false`, secret aléatoire, hôtes et origines exacts, paramètres MySQL, HTTPS, `collectstatic --noinput`, puis `check --deploy`. Les cookies deviennent Secure. Ne déclarer `TRUST_PROXY_SSL_HEADER=true` que si le proxy contrôle cet en-tête. Ajouter au proxy une limite des corps de requête et une limitation des tentatives de connexion admin. Les protections contre les tentatives de connexion doivent également être configurées au niveau du proxy ou d’une solution dédiée.
 
 Exécuter régulièrement `python manage.py clearsessions` pour supprimer les sessions expirées. Sauvegarder la base, les releases et les médias ensemble. Aucune purge de médias référencés par une ancienne release ne doit être faite à l'aveugle.
+
+## Patch V3 — organisation et Swagger
+
+Voir `PATCH_STRUCTURE_V3.md`. Le script `APPLY_PATCH.sh` supprime les anciens modules de `config/` après vérification de leur remplacement.

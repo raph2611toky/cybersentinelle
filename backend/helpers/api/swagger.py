@@ -5,7 +5,7 @@ from rest_framework.permissions import AllowAny
 api_info = openapi.Info(
     title="SAFIDIKO — API publique et éditoriale",
     default_version="v1",
-    description="Lecture publique /api/v1/. CRUD staff /api/editor/ avec permissions par modèle. Authentification staff via /admin/login/. Pour les écritures : cookie sessionid + X-CSRFToken (cookie csrftoken de Django Admin). Les visiteurs ne disposent d’aucune session applicative.",
+    description="Lecture publique /api/v1/. CRUD staff /api/editor/ avec permissions par modèle. Swagger protégé par un mot de passe dédié ; les opérations d’édition exigent séparément une session Django staff et X-CSRFToken. Les visiteurs ne disposent d’aucune session applicative.",
 )
 schema_view = get_schema_view(api_info, public=True, permission_classes=(AllowAny,))
 ERROR = openapi.Schema(

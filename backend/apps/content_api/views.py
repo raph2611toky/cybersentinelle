@@ -2,7 +2,7 @@
 
 from rest_framework.permissions import AllowAny
 from rest_framework.views import APIView
-from config.responses import public_json, error, failed
+from helpers.api.responses import public_json, error, failed
 from apps.publication.services import (
     read_content,
     ReleaseNotFound,

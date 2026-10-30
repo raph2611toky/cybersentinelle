@@ -2,7 +2,7 @@
 
 from drf_yasg import openapi
 from drf_yasg.utils import swagger_auto_schema
-from config.swagger import ERROR_RESPONSES
+from helpers.api.swagger import ERROR_RESPONSES
 
 str_field = lambda description="": openapi.Schema(
     type=openapi.TYPE_STRING, description=description

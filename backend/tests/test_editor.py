@@ -214,9 +214,13 @@ def test_visitor_session_endpoint_absent():
     assert r.json()['error']['code'] == 'NOT_FOUND'
 
 
-def test_admin_registered_and_docs_protected(editor):
+def test_admin_registered_and_docs_protected(editor, settings):
+    settings.SWAGGER_PASSWORD = "strong-documentation-password-123"
     assert Client().get("/api/docs/").status_code == 302
+    assert "/api/swagger/login/" in Client().get("/api/docs/")["Location"]
     assert editor.get("/admin/").status_code == 200
+    from django.core.signing import TimestampSigner
+    editor.cookies["safidiko_swagger_access"] = TimestampSigner(salt="safidiko.swagger.access.v1").sign("swagger-granted-v1")
     for app, model in [
         ("core", "langue"),
         ("content_api", "tantara"),
@@ -249,6 +253,7 @@ def test_upload_reencoded_under_media(editor, settings, tmp_path):
     r = editor.post("/api/editor/visuals/create/", data, format="multipart")
     assert r.status_code == 201, r.data
     assert r.data["fichier"].endswith(".png")
+    assert r.data["fichier_url"].startswith("http://testserver/media/")
     assert list(tmp_path.rglob("*.png"))
 
 

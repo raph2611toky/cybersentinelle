@@ -1,6 +1,6 @@
 from drf_yasg import openapi
 from drf_yasg.utils import swagger_auto_schema
-from config.swagger import ERROR_RESPONSES
+from helpers.api.swagger import ERROR_RESPONSES
 from apps.content_api.swagger import lang
 
 q = openapi.Schema(

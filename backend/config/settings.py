@@ -48,14 +48,14 @@ MIDDLEWARE = [
     "django.contrib.auth.middleware.AuthenticationMiddleware",
     "django.contrib.messages.middleware.MessageMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
-    "config.middleware.JsonErrorMiddleware",
-    "config.middleware.PrivacyHeadersMiddleware",
+    "helpers.api.middleware.JsonErrorMiddleware",
+    "helpers.api.middleware.PrivacyHeadersMiddleware",
 ]
 ROOT_URLCONF = "config.urls"
 TEMPLATES = [
     {
         "BACKEND": "django.template.backends.django.DjangoTemplates",
-        "DIRS": [],
+        "DIRS": [BASE_DIR / "templates"],
         "APP_DIRS": True,
         "OPTIONS": {
             "context_processors": [
@@ -122,7 +122,7 @@ REST_FRAMEWORK = {
     "DEFAULT_PAGINATION_CLASS": "rest_framework.pagination.PageNumberPagination",
     "PAGE_SIZE": 25,
     "DEFAULT_PERMISSION_CLASSES": ["rest_framework.permissions.IsAuthenticated"],
-    "EXCEPTION_HANDLER": "config.exceptions.json_exception_handler",
+    "EXCEPTION_HANDLER": "helpers.api.exceptions.json_exception_handler",
 }
 CORS_ALLOWED_ORIGINS = [
     x.strip()
@@ -148,10 +148,10 @@ SWAGGER_SETTINGS = {
             "type": "apiKey",
             "name": "X-CSRFToken",
             "in": "header",
-            "description": "Cookie csrftoken obtenu via Django Admin (/admin/) ; la connexion staff et les permissions sont requises.",
+            "description": "Le cookie de la protection Swagger ne donne pas de droits éditoriaux ; les écritures exigent une session staff Django et CSRF.",
         }
     },
-    "DEFAULT_INFO": "config.swagger.api_info",
+    "DEFAULT_INFO": "helpers.api.swagger.api_info",
 }
 SWAGGER_ENABLED = DEBUG or os.getenv("SWAGGER_ENABLED", "false").lower() == "true"
 SECURE_SSL_REDIRECT = not DEBUG
@@ -177,8 +177,14 @@ LOGGING = {
     },
 }
 
-MEDIA_URL = "/media/"
-MEDIA_ROOT = BASE_DIR / "media"
+MEDIA_URL = os.getenv("MEDIA_URL", "/media/")
+MEDIA_ROOT = Path(os.getenv("MEDIA_ROOT", str(BASE_DIR / "media"))).resolve()
+if not MEDIA_URL.endswith("/"):
+    raise RuntimeError("MEDIA_URL doit finir par / (exemple : /media/)")
+SWAGGER_PASSWORD = os.getenv("SWAGGER_PASSWORD", "")
+SWAGGER_COOKIE_MAX_AGE = int(os.getenv("SWAGGER_COOKIE_MAX_AGE", "3600"))
+if SWAGGER_COOKIE_MAX_AGE < 60 or SWAGGER_COOKIE_MAX_AGE > 86400:
+    raise RuntimeError("SWAGGER_COOKIE_MAX_AGE doit être compris entre 60 et 86400 secondes")
 SESSION_COOKIE_HTTPONLY = True
 SESSION_COOKIE_SECURE = not DEBUG
 CSRF_COOKIE_SECURE = not DEBUG

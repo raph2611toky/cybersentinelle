@@ -12,8 +12,8 @@ from rest_framework.exceptions import APIException, PermissionDenied, Validation
 from rest_framework.pagination import PageNumberPagination
 from rest_framework.response import Response
 
-from config.exceptions import json_exception_handler
-from config.responses import error
+from helpers.api.exceptions import json_exception_handler
+from helpers.api.responses import error
 
 logger = logging.getLogger('safidiko')
 

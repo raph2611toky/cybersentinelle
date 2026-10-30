@@ -1,0 +1,15 @@
+# À placer dans le server{} HTTPS de Nginx, adapté à votre chemin réel.
+# Ne jamais utiliser le répertoire media/ pour des documents sensibles ou réels.
+location ^~ /media/ {
+    alias /var/www/safidiko/backend/media/;
+    autoindex off;
+    types {
+        image/png png;
+        image/jpeg jpg jpeg;
+        image/webp webp;
+    }
+    default_type application/octet-stream;
+    add_header X-Content-Type-Options "nosniff" always;
+    add_header Cache-Control "public, max-age=3600" always;
+    try_files $uri =404;
+}

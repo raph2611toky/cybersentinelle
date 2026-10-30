@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="robots" content="noindex,nofollow">
+  <title>SAFIDIKO | Documentation sécurisée</title>
+  <style>
+    :root { color-scheme: dark; font-family: system-ui, -apple-system, "Segoe UI", sans-serif; }
+    * { box-sizing: border-box; }
+    body { margin: 0; min-height: 100dvh; display:grid; place-items:center; background:#101820; color:#f0f4f8; }
+    main { width:min(420px,calc(100vw - 32px)); background:#1c2936; border:1px solid #395068; border-radius:8px; padding:34px; }
+    h1 { margin:0 0 8px; color:#8de6ca; letter-spacing:.04em; font-size:24px; }
+    p { margin:0 0 24px; color:#adc2d3; font-size:14px; }
+    label { display:block; font-weight:600; margin:0 0 8px; }
+    input { width:100%; border:1px solid #607589; border-radius:5px; padding:13px; background:#0d1721; color:#fff; font-size:16px; }
+    button { width:100%; margin-top:18px; padding:13px; border:0; border-radius:5px; font-weight:700; background:#8de6ca; color:#10241e; cursor:pointer; }
+    button:disabled { opacity:.5;cursor:not-allowed; }
+    #message { margin-top:14px;color:#ffbba8;min-height:18px; }
+  </style>
+</head>
+<body>
+<main>
+  <h1>SAFIDIKO</h1>
+  <p>Documentation API · Accès privé indépendant de l'administration Django.</p>
+  {% if configured %}
+  <form id="unlock" autocomplete="off">
+    {% csrf_token %}
+    <input type="hidden" name="next" value="{{ next_url }}">
+    <label for="secret">Mot de passe Swagger</label>
+    <input id="secret" type="password" name="password" required autofocus autocomplete="off" minlength="1">
+    <button id="submit" type="submit">Ouvrir Swagger</button>
+  </form>
+  <div id="message" aria-live="polite"></div>
+  {% else %}
+    <div id="message" role="alert">SWAGGER_PASSWORD non configuré (minimum 12 caractères). L'accès est bloqué.</div>
+  {% endif %}
+</main>
+<script>
+  (() => {
+    const form = document.getElementById('unlock');
+    if (!form) return;
+    const message = document.getElementById('message');
+    form.addEventListener('submit', async (event) => {
+      event.preventDefault();
+      const button = document.getElementById('submit');
+      button.disabled = true;
+      message.textContent = '';
+      try {
+        const response = await fetch('/api/swagger/unlock/', {
+          method:'POST', credentials:'same-origin',
+          headers:{ 'Content-Type':'application/json', 'X-CSRFToken': form.querySelector('[name=csrfmiddlewaretoken]').value },
+          body: JSON.stringify({ password: form.password.value, next: form.elements.namedItem('next').value }),
+        });
+        const body = await response.json();
+        if (!response.ok) { message.textContent = body?.error?.message || 'Accès refusé'; return; }
+        window.location.assign(body.redirect || '/api/docs/');
+      } catch (_) { message.textContent = 'Connexion impossible. Réessayer.'; }
+      finally { button.disabled = false; }
+    });
+  })();
+</script>
+</body>
+</html>

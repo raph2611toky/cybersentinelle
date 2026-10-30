@@ -1,7 +1,7 @@
 """API publique des versions SAFIDIKO ; lecture seule."""
 from rest_framework.permissions import AllowAny
 from rest_framework.views import APIView
-from config.responses import public_json, error, failed
+from helpers.api.responses import public_json, error, failed
 from .services import active_release, ReleaseNotFound, manifest_public
 from .swagger import version_doc
 

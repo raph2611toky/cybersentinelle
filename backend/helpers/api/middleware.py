@@ -12,6 +12,8 @@ class JsonErrorMiddleware:
             return response
         labels = {
             400: ("BAD_REQUEST", "Requête invalide"),
+            401: ("UNAUTHENTICATED", "Authentification requise"),
+            503: ("SERVICE_UNAVAILABLE", "Service indisponible"),
             403: ("FORBIDDEN", "Accès refusé"),
             404: ("NOT_FOUND", "Ressource introuvable"),
             405: ("METHOD_NOT_ALLOWED", "Méthode interdite"),

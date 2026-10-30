@@ -1,5 +1,5 @@
 from datetime import datetime
-from urllib.parse import quote
+from django.core.files.storage import default_storage
 from django.conf import settings
 from django.utils import timezone
 
@@ -13,7 +13,10 @@ def time_elapsed(value: datetime, now: datetime | None = None) -> int:
 
 
 def media_url(path, request=None):
-    url = settings.MEDIA_URL + quote(str(path).lstrip("/"), safe="/")
+    """URL de stockage, pas d'assemblage naïf de MEDIA_URL et du chemin."""
+    if not path:
+        return None
+    url = default_storage.url(str(path).lstrip("/"))
     return request.build_absolute_uri(url) if request else url
 
 

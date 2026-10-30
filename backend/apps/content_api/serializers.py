@@ -14,7 +14,10 @@ def bilingual(obj, attr):
 def absolute_static_url(request, visual):
     if not visual or not visual.actif:
         return None
-    return media_url(visual.fichier.name or visual.chemin_asset, request)
+    if visual.fichier:
+        url = visual.fichier.url
+        return request.build_absolute_uri(url) if request else url
+    return media_url(visual.chemin_asset, request)
 
 
 def option_dict(o):

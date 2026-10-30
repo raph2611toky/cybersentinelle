@@ -91,7 +91,10 @@ def test_example_snapshot_story_and_etag():
 
 
 @pytest.mark.django_db
-def test_swagger_schema_json(admin_client):
+def test_swagger_schema_json(admin_client, settings):
+    settings.SWAGGER_PASSWORD = "strong-documentation-password-123"
+    from django.core.signing import TimestampSigner
+    admin_client.cookies["safidiko_swagger_access"] = TimestampSigner(salt="safidiko.swagger.access.v1").sign("swagger-granted-v1")
     r = admin_client.get("/api/swagger.json")
     assert r.status_code == 200
     body = r.json()
