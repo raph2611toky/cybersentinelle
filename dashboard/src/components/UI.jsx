@@ -1,4 +1,5 @@
 import { ArrowUpRight, MoreHorizontal } from 'lucide-react';
+import { Children, isValidElement } from 'react';
 import { Link } from 'react-router-dom';
 import { Sparkline } from './Charts';
 
@@ -30,8 +31,9 @@ export function EmptyState({ title, description }) {
   return <div className="empty-state"><MoreHorizontal size={23}/><strong>{title}</strong><span>{description}</span></div>;
 }
 
-export function Field({ label, children }) {
-  return <label className="field"><span>{label}</span>{children}</label>;
+export function Field({ label, children, required = false }) {
+  const inferred = Children.toArray(children).some(node => isValidElement(node) && node.props.required);
+  return <label className="field"><span className="field-label">{label}{(required || inferred) && <span className="required-asterisk" aria-label="obligatoire"> *</span>}</span>{children}</label>;
 }
 
 export function Dialog({ title, onClose, children }) {

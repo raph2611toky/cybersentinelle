@@ -2,6 +2,7 @@ from rest_framework import serializers
 from apps.content_api.serializers import bilingual
 from apps.core.serializers import ValidatedModelSerializer, RelationSummarySerializer
 from .models import Source, RessourceAide
+from apps.translation.mixins import FrenchFirstMixin,french_only_fields
 
 
 def resource_dict(obj):
@@ -37,13 +38,17 @@ class ResourceSerializer(serializers.Serializer):
     status = serializers.ChoiceField(choices=["active", "unavailable", "review_needed"])
 
 
-class SourceEditorSerializer(ValidatedModelSerializer):
+class SourceEditorSerializer(FrenchFirstMixin, ValidatedModelSerializer):
+    translation_fields = ('nom', 'portee')
+    translation_state = FrenchFirstMixin.translation_state
     class Meta:
         model = Source
+        extra_kwargs = french_only_fields(('nom', 'portee'))
         fields = (
             "id",
             "created_at",
             "updated_at",
+            "translation_state",
             "code",
             "nom_fr",
             "nom_mg",
@@ -57,7 +62,9 @@ class SourceEditorSerializer(ValidatedModelSerializer):
         read_only_fields = ("id", "created_at", "updated_at")
 
 
-class RessourceAideEditorSerializer(ValidatedModelSerializer):
+class RessourceAideEditorSerializer(FrenchFirstMixin, ValidatedModelSerializer):
+    translation_fields = ('titre', 'description', 'action', 'audience', 'limites', 'zone')
+    translation_state = FrenchFirstMixin.translation_state
     source_detail = RelationSummarySerializer(
         source="source", read_only=True, allow_null=True
     )
@@ -67,10 +74,12 @@ class RessourceAideEditorSerializer(ValidatedModelSerializer):
 
     class Meta:
         model = RessourceAide
+        extra_kwargs = french_only_fields(('titre', 'description', 'action', 'audience', 'limites', 'zone'))
         fields = (
             "id",
             "created_at",
             "updated_at",
+            "translation_state",
             "revision",
             "statut_editorial",
             "valide_le",

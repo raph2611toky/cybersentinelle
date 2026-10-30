@@ -5,6 +5,7 @@ from rest_framework import serializers
 from .models import Tantara, Noeud, OptionDecision
 from apps.core.serializers import ValidatedModelSerializer, RelationSummarySerializer
 from .models import Sujet, Visuel, Tantara, Noeud, OptionDecision
+from apps.translation.mixins import FrenchFirstMixin, french_only_fields
 
 
 def bilingual(obj, attr):
@@ -92,13 +93,17 @@ class StoryDetailSerializer(StoryListSerializer):
     nodes = serializers.DictField(child=serializers.JSONField())
 
 
-class SujetEditorSerializer(ValidatedModelSerializer):
+class SujetEditorSerializer(FrenchFirstMixin, ValidatedModelSerializer):
+    translation_fields = ('libelle', 'description')
+    translation_state = FrenchFirstMixin.translation_state
     class Meta:
         model = Sujet
+        extra_kwargs = french_only_fields(('libelle', 'description'))
         fields = (
             "id",
             "created_at",
             "updated_at",
+            "translation_state",
             "code",
             "libelle_fr",
             "libelle_mg",
@@ -110,7 +115,9 @@ class SujetEditorSerializer(ValidatedModelSerializer):
         read_only_fields = ("id", "created_at", "updated_at")
 
 
-class VisuelEditorSerializer(ValidatedModelSerializer):
+class VisuelEditorSerializer(FrenchFirstMixin,ValidatedModelSerializer):
+    translation_fields=("alt",)
+    translation_state=FrenchFirstMixin.translation_state
     fichier_url = serializers.SerializerMethodField()
     chemin_asset_url = serializers.SerializerMethodField()
 
@@ -148,10 +155,12 @@ class VisuelEditorSerializer(ValidatedModelSerializer):
 
     class Meta:
         model = Visuel
+        extra_kwargs = french_only_fields(("alt",))
         fields = (
             "id",
             "created_at",
             "updated_at",
+            "translation_state",
             "code",
             "type",
             "fichier",
@@ -173,7 +182,16 @@ class VisuelEditorSerializer(ValidatedModelSerializer):
         read_only_fields = ("id", "created_at", "updated_at", "fichier_url", "chemin_asset_url")
 
 
-class TantaraEditorSerializer(ValidatedModelSerializer):
+class TantaraEditorSerializer(FrenchFirstMixin, ValidatedModelSerializer):
+    def validate_duree(self, value):
+        import re
+        match = re.fullmatch(r'([1-9][0-9]{0,2}) min', value.strip())
+        if not match or not (1 <= int(match.group(1)) <= 180):
+            raise serializers.ValidationError('Durée attendue : 1 à 180 min (ex. 5 min).')
+        return f"{int(match.group(1))} min"
+
+    translation_fields = ('titre', 'sous_titre', 'theme', 'description', 'avertissement')
+    translation_state = FrenchFirstMixin.translation_state
     visuel_heros_url = serializers.SerializerMethodField()
 
     def get_visuel_heros_url(self, obj):
@@ -188,10 +206,12 @@ class TantaraEditorSerializer(ValidatedModelSerializer):
 
     class Meta:
         model = Tantara
+        extra_kwargs = french_only_fields(('titre', 'sous_titre', 'theme', 'description', 'avertissement'))
         fields = (
             "id",
             "created_at",
             "updated_at",
+            "translation_state",
             "revision",
             "statut_editorial",
             "valide_le",
@@ -227,7 +247,9 @@ class TantaraEditorSerializer(ValidatedModelSerializer):
         read_only_fields = ("id", "created_at", "updated_at", "publie_le")
 
 
-class NoeudEditorSerializer(ValidatedModelSerializer):
+class NoeudEditorSerializer(FrenchFirstMixin, ValidatedModelSerializer):
+    translation_fields = ('titre', 'texte')
+    translation_state = FrenchFirstMixin.translation_state
     visuel_url = serializers.SerializerMethodField()
 
     def get_visuel_url(self, obj):
@@ -245,10 +267,12 @@ class NoeudEditorSerializer(ValidatedModelSerializer):
 
     class Meta:
         model = Noeud
+        extra_kwargs = french_only_fields(('titre', 'texte'))
         fields = (
             "id",
             "created_at",
             "updated_at",
+            "translation_state",
             "tantara",
             "cle",
             "type",
@@ -269,7 +293,9 @@ class NoeudEditorSerializer(ValidatedModelSerializer):
         read_only_fields = ("id", "created_at", "updated_at")
 
 
-class OptionDecisionEditorSerializer(ValidatedModelSerializer):
+class OptionDecisionEditorSerializer(FrenchFirstMixin, ValidatedModelSerializer):
+    translation_fields = ('label', 'feedback')
+    translation_state = FrenchFirstMixin.translation_state
     noeud_detail = RelationSummarySerializer(
         source="noeud", read_only=True, allow_null=True
     )
@@ -279,10 +305,12 @@ class OptionDecisionEditorSerializer(ValidatedModelSerializer):
 
     class Meta:
         model = OptionDecision
+        extra_kwargs = french_only_fields(('label', 'feedback'))
         fields = (
             "id",
             "created_at",
             "updated_at",
+            "translation_state",
             "noeud",
             "cle",
             "label_fr",

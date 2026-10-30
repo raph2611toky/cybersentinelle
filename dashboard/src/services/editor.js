@@ -9,6 +9,11 @@ export const authApi = {
   logout: () => api.post(`${editor}/auth/logout/`, {}),
 };
 
+export const translationApi = {
+  status:(target_type,target_id)=>api.get(`${editor}/translations/status/`,{params:{target_type,target_id}}),
+  retry:(target_type,target_id)=>api.post(`${editor}/translations/retry/`,{target_type,target_id}),
+};
+
 export const storyApi = {
   list: () => allPages(`${editor}/stories/`),
   create: data => api.post(`${editor}/stories/create/`, data),

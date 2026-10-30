@@ -60,13 +60,13 @@ export default function Login() {
         <h1>Connexion</h1>
 
         <label className="auth-field">
-          <span>Adresse e-mail</span>
+          <span>Adresse e-mail <span className="required-asterisk">*</span></span>
           <div className="auth-input"><Mail size={16}/><input type="email" required value={email}
                onChange={e => setEmail(e.target.value)} placeholder="admin@safidiko.mg" autoComplete="username"/></div>
         </label>
 
         <label className="auth-field">
-          <span>Mot de passe</span>
+          <span>Mot de passe <span className="required-asterisk">*</span></span>
           <div className="auth-input"><Lock size={16}/><input type="password" required value={password}
                onChange={e => setPassword(e.target.value)} placeholder="••••••••" autoComplete="current-password"/></div>
         </label>

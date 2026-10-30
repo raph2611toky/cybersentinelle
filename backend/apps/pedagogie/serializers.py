@@ -2,6 +2,7 @@ from rest_framework import serializers
 from apps.content_api.serializers import bilingual
 from apps.core.serializers import ValidatedModelSerializer, RelationSummarySerializer
 from .models import QuestionPedagogique
+from apps.translation.mixins import FrenchFirstMixin,french_only_fields
 
 
 def question_dict(obj):
@@ -24,7 +25,9 @@ class QuestionSerializer(serializers.Serializer):
     version = serializers.CharField()
 
 
-class QuestionPedagogiqueEditorSerializer(ValidatedModelSerializer):
+class QuestionPedagogiqueEditorSerializer(FrenchFirstMixin,ValidatedModelSerializer):
+    translation_fields=("question","reponse")
+    translation_state=FrenchFirstMixin.translation_state
     sujet_detail = RelationSummarySerializer(
         source="sujet", read_only=True, allow_null=True
     )
@@ -34,10 +37,12 @@ class QuestionPedagogiqueEditorSerializer(ValidatedModelSerializer):
 
     class Meta:
         model = QuestionPedagogique
+        extra_kwargs=french_only_fields(("question","reponse"))
         fields = (
             "id",
             "created_at",
             "updated_at",
+            "translation_state",
             "revision",
             "statut_editorial",
             "valide_le",

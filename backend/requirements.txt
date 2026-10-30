@@ -12,3 +12,6 @@ Pillow>=11,<13
 # Studio media : traitements en file, images inspectées avec Pillow déjà installé.
 celery>=5.4,<6
 redis>=5,<7
+
+# Authenticated Google Cloud Translation API client (FR -> MG).
+google-cloud-translate>=3.15,<4

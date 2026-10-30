@@ -7,7 +7,9 @@ simple_graph=openapi.Schema(type=openapi.TYPE_OBJECT,required=['nodes','edges'],
     'edges':openapi.Schema(type=openapi.TYPE_ARRAY,items=openapi.Schema(type=openapi.TYPE_OBJECT)),
 })
 graph_response=openapi.Schema(type=openapi.TYPE_OBJECT,properties={
-    'graph':simple_graph,'revision':openapi.Schema(type=openapi.TYPE_INTEGER)})
+    'graph':simple_graph,'revision':openapi.Schema(type=openapi.TYPE_INTEGER),
+'draft_id':openapi.Schema(type=openapi.TYPE_STRING, read_only=True),
+'translation_state':openapi.Schema(type=openapi.TYPE_OBJECT)})
 graph_input=openapi.Schema(type=openapi.TYPE_OBJECT,required=['graph','revision'],properties={
     'graph':simple_graph,'revision':openapi.Schema(type=openapi.TYPE_INTEGER,minimum=0)})
 error=openapi.Schema(type=openapi.TYPE_OBJECT,properties={

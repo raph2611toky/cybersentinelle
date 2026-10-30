@@ -50,6 +50,24 @@ export function AdminProvider({ children }) {
     return () => {alive=false};
   },[refresh]);
 
+  // Refresh only editorial lists while Google translation workers are active.
+  useEffect(()=>{
+    if(!auth.authed)return;
+    const pending=[...data.stories,...data.resources,...data.sources].some(
+      item=>item.translation_state?.state==='PENDING'
+    );
+    if(!pending)return;
+    let alive=true;
+    const timer=setInterval(async()=>{
+      try{
+        const [stories,resources,sources]=await Promise.all([storyApi.list(),resourceApi.list(),resourceApi.sources()]);
+        if(alive)setData(old=>({...old,
+          stories:stories.map(normalizeStory),resources:resources.map(normalizeResource),sources}));
+      }catch{ /* Keep the last consistent snapshot; user can retry refresh. */ }
+    },8000);
+    return ()=>{alive=false;clearInterval(timer)};
+  },[auth.authed,data.stories,data.resources,data.sources]);
+
   const login = useCallback(async (username,password) => {
     setBusy(true);setError('');
     const currentEpoch=++epoch.current;

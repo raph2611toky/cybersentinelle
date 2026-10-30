@@ -30,6 +30,7 @@ from apps.pedagogie.models import QuestionPedagogique
 from apps.pedagogie.serializers import question_dict
 from apps.pedagogie.validation import validate_question
 from .models import VersionContenu, FichierContenu
+from apps.translation.services import ensure_ready
 
 
 class ReleaseNotFound(Exception):
@@ -157,6 +158,7 @@ def publication_payload():
         raise ValidationError("Au moins une histoire est requise pour publier")
     assets = {}
     for visual in Visuel.objects.filter(actif=True):
+        ensure_ready('content_api.Visuel',visual.pk)
         visual.full_clean()
         # Les chemins statiques doivent référencer une ressource intégrée au dépôt.
         asset_path = visual.fichier.name or visual.chemin_asset
@@ -172,6 +174,10 @@ def publication_payload():
         assets[visual.code] = asset_path
     result = {}
     for story in stories:
+        ensure_ready('content_api.Tantara',story.pk)
+        from apps.content_api.models import BrouillonGraphe
+        for draft_id in BrouillonGraphe.objects.filter(tantara=story).values_list('pk',flat=True):
+            ensure_ready('content_api.BrouillonGraphe',draft_id)
         story.full_clean()
         if story.statut_editorial not in {
             StatutEditorial.APPROUVE,
@@ -226,6 +232,7 @@ def publication_payload():
             story_data['nodes'][scene.noeud.cle].setdefault('media', {})[scene.langue.code] = info
         result[f"stories/{story.slug}.json"] = story_data
     for sujet in Sujet.objects.filter(actif=True):
+        ensure_ready('content_api.Sujet',sujet.pk)
         sujet.full_clean()
     resources = list(
         RessourceAide.objects.select_related("source", "ressource_repli").filter(
@@ -234,6 +241,8 @@ def publication_payload():
     )
     included_ids = {r.pk for r in resources}
     for r in resources:
+        ensure_ready('resources.RessourceAide',r.pk)
+        ensure_ready('resources.Source',r.source_id)
         if r.ressource_repli_id and r.ressource_repli_id not in included_ids:
             raise ValidationError(f"{r.cle}: ressource de repli non publiable")
         r.source.full_clean()
@@ -253,6 +262,7 @@ def publication_payload():
         )
     )
     for q in questions:
+        ensure_ready('pedagogie.QuestionPedagogique',q.pk)
         validate_question(q)
         for x in (
             q.relecture_fr_le,

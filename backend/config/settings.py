@@ -38,6 +38,7 @@ INSTALLED_APPS = [
     "apps.pedagogie.apps.PedagogieConfig",
     "apps.publication.apps.PublicationConfig",
     "apps.media_studio.apps.MediaStudioConfig",
+    "apps.translation.apps.TranslationConfig",
 ]
 MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",
@@ -230,3 +231,7 @@ CELERY_BROKER_URL = os.getenv('CELERY_BROKER_URL', 'redis://127.0.0.1:6379/0')
 CELERY_TASK_IGNORE_RESULT = True
 CELERY_TASK_ACKS_LATE = True
 CELERY_WORKER_PREFETCH_MULTIPLIER = 1
+
+# Éviter que l'envoi au broker bloque longtemps la réponse HTTP si Redis est arrêté.
+CELERY_BROKER_CONNECTION_TIMEOUT = 1
+CELERY_BROKER_TRANSPORT_OPTIONS = {'socket_connect_timeout': 0.5, 'socket_timeout': 0.5}
