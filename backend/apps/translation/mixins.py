@@ -6,6 +6,7 @@ rejects unfinished tasks; translators must be human-reviewed before release.
 from django.db import transaction
 from rest_framework import serializers
 from .services import create_jobs, job_summary
+from copy import copy
 
 
 class FrenchFirstMixin:
@@ -16,7 +17,7 @@ class FrenchFirstMixin:
         return job_summary(obj._meta.label,obj.pk)
 
     def to_internal_value(self, data):
-        data=data.copy()
+        data=copy(data)
         changed=[]
         for prefix in self.translation_fields:
             fr=f'{prefix}_fr';mg=f'{prefix}_mg'
