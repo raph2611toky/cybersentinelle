@@ -1,62 +1,92 @@
-import { createContext, useContext, useEffect, useMemo, useState } from 'react';
-import { initialStories, initialResources, newGraph } from '../data/seed';
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
+import { authApi, storyApi, resourceApi, studioApi, publicationApi, normalizeStory, normalizeResource } from '../services/editor';
+import { apiError } from '../services/api';
 
 const AdminContext = createContext(null);
-const STORAGE_KEY = 'safidiko.admin.demo.v1';
-const AUTH_KEY = 'safidiko.auth.v1';
-const uid = () => crypto.randomUUID?.() || `${Date.now()}-${Math.random().toString(16).slice(2)}`;
-const initialState = { stories: initialStories, resources: initialResources };
-
-function loadState() {
-  try {
-    const saved = JSON.parse(localStorage.getItem(STORAGE_KEY) || 'null');
-    if (Array.isArray(saved?.stories) && Array.isArray(saved?.resources)) return saved;
-  } catch { /* stockage local indisponible */ }
-  return initialState;
-}
-
-function loadAuth() {
-  try {
-    const saved = JSON.parse(localStorage.getItem(AUTH_KEY) || 'null');
-    if (saved?.authed) return saved;
-  } catch { /* stockage local indisponible */ }
-  return { authed: false, user: null };
-}
+const EMPTY = { stories:[], nodes:[], options:[], resources:[], sources:[], media:[], voices:[], scenes:[], jobs:[], releases:[], languages:[] };
 
 export function AdminProvider({ children }) {
-  const [data, setData] = useState(loadState);
-  const [auth, setAuth] = useState(loadAuth);
+  const [auth, setAuth] = useState({ authed:false, loading:true, user:null });
+  const [data, setData] = useState(EMPTY);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const epoch = useRef(0);
+
+  const refresh = useCallback(async () => {
+    const currentEpoch=epoch.current;
+    const tasks = {
+      stories:storyApi.list(), nodes:storyApi.nodes(), options:storyApi.options(), resources:resourceApi.list(), sources:resourceApi.sources(),
+      media:studioApi.media(), voices:studioApi.voices(), scenes:studioApi.scenes(),
+      jobs:studioApi.jobs(), releases:publicationApi.releases(), languages:studioApi.languages(),
+    };
+    const keys = Object.keys(tasks);
+    const responses = await Promise.allSettled(Object.values(tasks));
+    const failures = [];
+    const received={};
+    responses.forEach((result,i)=>{
+      if(result.status==='fulfilled') received[keys[i]]=(result.value||[]).map(v=>keys[i]==='stories'?normalizeStory(v):keys[i]==='resources'?normalizeResource(v):v);
+      else failures.push(`${keys[i]} : ${apiError(result.reason)}`);
+    });
+    if(epoch.current===currentEpoch) {
+      setData(prev=>({...prev,...received}));
+      setError(failures.join(' | '));
+    }
+    return failures;
+  }, []);
+
   useEffect(() => {
-    try { localStorage.setItem(STORAGE_KEY, JSON.stringify(data)); } catch { /* espace indisponible */ }
-  }, [data]);
-  useEffect(() => {
-    try { localStorage.setItem(AUTH_KEY, JSON.stringify(auth)); } catch { /* espace indisponible */ }
-  }, [auth]);
+    let alive=true;
+    (async () => {
+      try {
+        await authApi.csrf();
+        const { data:resp }=await authApi.me();
+        if(alive) setAuth({authed:true,loading:false,user:resp.user});
+        // Après authentification : aucune récupération de contenus avant autorisation.
+        if(alive) await refresh();
+      } catch {
+        if(alive) setAuth({authed:false,loading:false,user:null});
+      }
+    })();
+    return () => {alive=false};
+  },[refresh]);
 
-  const login = (user = {}) => {
-    const name = (user.name || user.email || 'Administrateur').trim();
-    setAuth({ authed: true, user: { name, role: user.role || 'Studio SAFIDIKO' } });
-  };
-  const logout = () => setAuth({ authed: false, user: null });
+  const login = useCallback(async (username,password) => {
+    setBusy(true);setError('');
+    const currentEpoch=++epoch.current;
+    try {
+      await authApi.csrf();
+      const {data:res}=await authApi.login(username,password);
+      if(epoch.current!==currentEpoch) return;
+      setAuth({authed:true,loading:false,user:res.user});
+      await refresh();
+      return res.user;
+    } catch(e) {setError(apiError(e));throw e} finally {setBusy(false)}
+  },[refresh]);
 
-  const addStory = ({ title, theme }) => {
-    const story = { id: uid(), title: title.trim(), theme: theme.trim(), status: 'draft', language: 'FR / MG', updatedAt: new Date().toISOString(), graph: newGraph(title.trim()) };
-    setData(prev => ({ ...prev, stories: [story, ...prev.stories] }));
-    return story.id;
-  };
-  const updateStory = (id, patch) => setData(prev => ({ ...prev, stories: prev.stories.map(s => s.id === id ? { ...s, ...patch, updatedAt: new Date().toISOString() } : s) }));
-  const removeStory = id => setData(prev => ({ ...prev, stories: prev.stories.filter(s => s.id !== id) }));
-  const addResource = info => setData(prev => ({ ...prev, resources: [{ id: uid(), ...info, status: 'draft' }, ...prev.resources] }));
-  const updateResource = (id, patch) => setData(prev => ({ ...prev, resources: prev.resources.map(r => r.id === id ? { ...r, ...patch } : r) }));
-  const removeResource = id => setData(prev => ({ ...prev, resources: prev.resources.filter(r => r.id !== id) }));
-  const resetDemo = () => setData(initialState);
+  const logout = useCallback(async () => {
+    ++epoch.current;
+    try { await authApi.logout(); } finally {
+      setAuth({authed:false,loading:false,user:null});setData(EMPTY);setError('');
+    }
+  },[]);
 
-  const value = useMemo(() => ({ ...data, auth, login, logout, addStory, updateStory, removeStory, addResource, updateResource, removeResource, resetDemo }), [data, auth]);
+  const perform = useCallback(async (call) => {
+    setBusy(true);setError('');
+    try { const result=await call(); await refresh(); return result?.data ?? result; }
+    catch(e){ const message=apiError(e);setError(message); throw new Error(message); }
+    finally{setBusy(false)}
+  },[refresh]);
+
+  const addStory = useCallback(payload=>perform(()=>storyApi.create(payload)),[perform]);
+  const updateStory = useCallback((id,patch)=>perform(()=>storyApi.update(id,patch)),[perform]);
+  const removeStory = useCallback(id=>perform(()=>storyApi.delete(id)),[perform]);
+  const addResource = useCallback(payload=>perform(()=>resourceApi.create(payload)),[perform]);
+  const updateResource = useCallback((id,patch)=>perform(()=>resourceApi.update(id,patch)),[perform]);
+  const removeResource = useCallback(id=>perform(()=>resourceApi.delete(id)),[perform]);
+
+  const value=useMemo(()=>({ ...data, auth, busy, error, setError, refresh, login, logout,
+    perform, addStory, updateStory, removeStory, addResource, updateResource, removeResource,
+  }),[data,auth,busy,error,refresh,login,logout,perform,addStory,updateStory,removeStory,addResource,updateResource,removeResource]);
   return <AdminContext.Provider value={value}>{children}</AdminContext.Provider>;
 }
-
-export function useAdmin() {
-  const ctx = useContext(AdminContext);
-  if (!ctx) throw new Error('useAdmin doit être utilisé dans AdminProvider');
-  return ctx;
-}
+export function useAdmin(){const context=useContext(AdminContext);if(!context)throw new Error('AdminProvider requis');return context}

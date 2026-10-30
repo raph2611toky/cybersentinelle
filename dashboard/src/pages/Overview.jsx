@@ -5,20 +5,22 @@ import { AreaChart, Donut } from '../components/Charts';
 import { useAdmin } from '../lib/store';
 
 export default function Overview() {
-  const { stories, resources } = useAdmin();
+  const { stories, resources, nodes:backendNodes, options:backendOptions } = useAdmin();
   const published = stories.filter(s => s.status === 'published').length;
   const drafts = stories.filter(s => s.status === 'draft').length;
   const review = stories.filter(s => s.status === 'review' || s.status === 'ready').length;
-  const nodes = stories.reduce((sum, s) => sum + (s.graph?.nodes?.length || 0), 0);
-  const choices = stories.reduce((sum, s) => sum + (s.graph?.edges?.length || 0), 0);
+  const nodes = backendNodes.length;
+  const choices = backendOptions.length;
   const issues = stories.filter(s => s.status !== 'published');
 
-  // Activité éditoriale (démo) — contenus ajoutés par semaine
-  const activity = [
-    { label: 'S1', a: 2, b: 1 }, { label: 'S2', a: 4, b: 2 }, { label: 'S3', a: 3, b: 3 },
-    { label: 'S4', a: 6, b: 4 }, { label: 'S5', a: 5, b: 4 }, { label: 'S6', a: 8, b: 6 },
-    { label: 'S7', a: 7, b: 6 }, { label: 'S8', a: 10, b: 8 },
-  ];
+  // Données réelles : nombre de contenus mis à jour chaque semaine.
+  const now=new Date();
+  const activity=Array.from({length:8},(_,i)=>{
+    const end=new Date(now);end.setDate(end.getDate()-(7-i)*7);
+    const begin=new Date(end);begin.setDate(begin.getDate()-7);
+    return {label:`S${i+1}`,a:stories.filter(s=>{const d=new Date(s.updatedAt);return d>=begin&&d<end}).length,
+      b:backendNodes.filter(n=>{const d=new Date(n.updated_at);return d>=begin&&d<end}).length};
+  });
 
   const segments = [
     { label: 'Publiés', value: published || 0, color: '#31b7ff' },
@@ -28,16 +30,16 @@ export default function Overview() {
 
   return <div className="page-stack">
     <div className="stats-grid">
-      <StatCard label="Tantara" value={stories.length.toString().padStart(2, '0')} note="Histoires disponibles" icon={BookOpen} tone="purple" trend={[3, 4, 4, 5, 6, 6, 7, stories.length]}/>
-      <StatCard label="Publiés" value={String(published).padStart(2, '0')} note="Contenus en ligne (démo)" icon={CheckCircle2} tone="blue" trend={[1, 1, 2, 2, 2, 3, 3, published]}/>
-      <StatCard label="Brouillons" value={String(drafts).padStart(2, '0')} note="À finaliser" icon={Pencil} tone="purple" trend={[2, 2, 3, 2, 3, 2, 2, drafts]}/>
-      <StatCard label="Nœuds narratifs" value={String(nodes).padStart(2, '0')} note="Scènes, choix et fins" icon={GitBranch} tone="blue" trend={[4, 6, 7, 9, 10, 11, 12, nodes]}/>
+      <StatCard label="Tantara" value={stories.length.toString().padStart(2, '0')} note="Histoires disponibles" icon={BookOpen} tone="purple" />
+      <StatCard label="Publiés" value={String(published).padStart(2, '0')} note="Statuts éditoriaux en base" icon={CheckCircle2} tone="blue" />
+      <StatCard label="Brouillons" value={String(drafts).padStart(2, '0')} note="À finaliser" icon={Pencil} tone="purple" />
+      <StatCard label="Nœuds narratifs" value={String(nodes).padStart(2, '0')} note="Scènes, choix et fins" icon={GitBranch} tone="blue" />
     </div>
 
     <div className="chart-grid">
       <Panel title="Activité éditoriale" icon={TrendingUp} className="chart-card"
              action={<span className="chart-tag">8 dernières semaines</span>}>
-        <AreaChart data={activity} legend={['Scènes', 'Choix']}/>
+        <AreaChart data={activity} legend={['Tantara', 'Nœuds']}/>
       </Panel>
       <Panel title="Répartition" icon={Layers3} className="donut-card">
         <div className="donut-wrap">

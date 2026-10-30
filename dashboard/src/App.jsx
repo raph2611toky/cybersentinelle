@@ -14,6 +14,7 @@ import { useAdmin } from './lib/store';
 function RequireAuth({ children }) {
   const { auth } = useAdmin();
   const location = useLocation();
+  if (auth.loading) return <div className="loading-screen">Vérification de la session administrateur…</div>;
   return auth.authed ? children : <Navigate to="/login" replace state={{ from: location }} />;
 }
 

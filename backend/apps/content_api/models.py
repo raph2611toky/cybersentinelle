@@ -248,3 +248,14 @@ class OptionDecision(ModeleBase):
 
     def __str__(self):
         return f"{self.noeud}:{self.cle}"
+
+
+class BrouillonGraphe(models.Model):
+    """État graphique privé du studio ; distinct des nœuds validés/publiables."""
+    tantara = models.OneToOneField(Tantara, on_delete=models.CASCADE, related_name='brouillon_graphe')
+    graphe = models.JSONField(default=dict)
+    revision = models.PositiveIntegerField(default=1)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = 'content_api_brouillon_graphe'

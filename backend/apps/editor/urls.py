@@ -1,5 +1,7 @@
 """Routes d'édition explicites : une vue = une seule méthode HTTP."""
 from django.urls import path
+from apps.content_api.graph_views import GraphReadAPIView, GraphSaveAPIView, GraphApplyAPIView
+from apps.editor.auth_views import AdminCSRFAPIView, AdminLoginAPIView, AdminMeAPIView, AdminLogoutAPIView
 from apps.core.views import (
     LangueListView,
     LangueDetailView,
@@ -65,6 +67,13 @@ from apps.pedagogie.editor_views import (
 from apps.publication.editor_views import (ReleaseListView, ReleaseDetailView, ReleasePublishView, ReleaseRollbackView, ReleaseValidateView)
 
 urlpatterns = [
+    path("stories/<uuid:pk>/graph/", GraphReadAPIView.as_view(), name="editor-graph-read"),
+    path("stories/<uuid:pk>/graph/save/", GraphSaveAPIView.as_view(), name="editor-graph-save"),
+    path("stories/<uuid:pk>/graph/apply/", GraphApplyAPIView.as_view(), name="editor-graph-apply"),
+    path("auth/csrf/", AdminCSRFAPIView.as_view(), name="editor-auth-csrf"),
+    path("auth/login/", AdminLoginAPIView.as_view(), name="editor-auth-login"),
+    path("auth/me/", AdminMeAPIView.as_view(), name="editor-auth-me"),
+    path("auth/logout/", AdminLogoutAPIView.as_view(), name="editor-auth-logout"),
     path("languages/", LangueListView.as_view(), name="editor-languages-list"),
     path("languages/create/", LangueCreateView.as_view(), name="editor-languages-create"),
     path("languages/<uuid:pk>/", LangueDetailView.as_view(), name="editor-languages-retrieve"),

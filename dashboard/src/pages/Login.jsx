@@ -10,14 +10,18 @@ export default function Login() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [lang, setLang] = useState('FR');
+  const [submitError,setSubmitError] = useState('');
+  const [submitting,setSubmitting] = useState(false);
 
   const to = location.state?.from?.pathname || '/';
   useEffect(() => { if (auth.authed) navigate(to, { replace: true }); }, [auth.authed]);
 
-  const submit = e => {
+  const submit = async e => {
     e.preventDefault();
-    login({ email });
-    navigate(to, { replace: true });
+    setSubmitError('');setSubmitting(true);
+    try {await login(email, password); navigate(to, {replace:true});}
+    catch(error){setSubmitError(error?.response?.data?.error?.message || error?.message || 'Échec de connexion.');}
+    finally {setSubmitting(false)}
   };
 
   return <div className="auth-shell">
@@ -72,10 +76,11 @@ export default function Login() {
             {['FR', 'MG'].map(l => <button type="button" key={l}
                  className={lang === l ? 'selected' : ''} onClick={() => setLang(l)}>{l}</button>)}
           </div>
-          <a className="auth-link" href="#">Mot de passe oublié ?</a>
+          <span className="auth-link">Réinitialisation via l’administrateur Django</span>
         </div>
 
-        <button type="submit" className="auth-submit">Se connecter<ArrowRight size={17}/></button>
+        <button type="submit" className="auth-submit" disabled={submitting}>{submitting?"Connexion…":"Se connecter"}<ArrowRight size={17}/></button>
+        {submitError && <p role="alert" className="api-error">{submitError}</p>}
         <p className="auth-note">Accès réservé à l’équipe éditoriale SAFIDIKO.</p>
       </form></section>
     </main>

@@ -32,7 +32,7 @@ export default function Shell() {
   const [showSearch, setShowSearch] = useState(false);
   const location = useLocation();
   const navigate = useNavigate();
-  const { auth, logout } = useAdmin();
+  const { auth, logout, error, setError } = useAdmin();
   const [title, desc] = titles[location.pathname] || titles['/'];
 
   const userName = auth.user?.name || 'Administrateur';
@@ -40,7 +40,7 @@ export default function Shell() {
   const initials = (userName.split(' ').map(w => w[0]).join('').slice(0, 2).toUpperCase()) || 'AD';
 
   const doSearch = e => { e.preventDefault(); if (search.trim()) { navigate(`/tantara?q=${encodeURIComponent(search.trim())}`); setMobileOpen(false); } };
-  const handleLogout = () => { logout(); navigate('/login', { replace: true }); };
+  const handleLogout = async () => { try { await logout(); } catch { /* session locale invalidée même si le serveur est indisponible */ } navigate('/login', { replace: true }); };
 
   return <div className={`app-shell ${collapsed ? 'sidebar-collapsed' : ''} ${mobileOpen ? 'mobile-open' : ''}`}>
     <aside className="sidebar">
@@ -55,7 +55,7 @@ export default function Shell() {
         <div className="heading"><span className="eyebrow"><span className="active-dot"/>SAFIDIKO / ADMIN</span><h1>{title}</h1><p>{desc}</p></div>
         <div className="top-actions"><form onSubmit={doSearch} className={`global-search ${showSearch?'expanded':''}`}><Search size={17}/><input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Rechercher un Tantara..." aria-label="Rechercher"/><button type="submit" title="Rechercher"><ChevronRight size={16}/></button></form><button className="icon-button mobile-search" onClick={()=>setShowSearch(v=>!v)} aria-label="Recherche"><Search size={20}/></button><span className="header-divider"/><span className="top-avatar" title={userName}>{initials}</span></div>
       </header>
-      <div className="page-body"><Outlet /></div>
+      <div className="page-body">{error && <div role="alert" className="api-banner"><span>{error}</span><button aria-label="Fermer l’alerte" onClick={()=>setError('')}>×</button></div>}<Outlet /></div>
     </main>
   </div>;
 }

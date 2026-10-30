@@ -1,47 +1,59 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { BookOpen, Copy, Eye, GitBranch, Pencil, Plus, Search, Trash2 } from 'lucide-react';
+import { BookOpen, Eye, GitBranch, Pencil, Plus, Search, Trash2 } from 'lucide-react';
 import { Dialog, EmptyState, Field, Panel, StatCard, Status } from '../components/UI';
 import { useAdmin } from '../lib/store';
 
-export default function Tantara() {
-  const { stories, addStory, updateStory, removeStory } = useAdmin();
-  const navigate = useNavigate();
-  const [params] = useSearchParams();
-  const [search, setSearch] = useState(params.get('q') || '');
-  const [status, setStatus] = useState('all');
-  const [modal, setModal] = useState(null);
-  const [form, setForm] = useState({ title: '', theme: '' });
-  useEffect(() => setSearch(params.get('q') || ''), [params]);
-  const filtered = useMemo(() => stories.filter(s => (status === 'all' || s.status === status) && `${s.title} ${s.theme}`.toLowerCase().includes(search.toLowerCase())), [stories, search, status]);
-  const openCreate = () => { setForm({ title:'', theme:'' }); setModal({mode:'create'}); };
-  const openEdit = story => { setForm({title:story.title, theme:story.theme}); setModal({mode:'edit', story}); };
-  const save = e => {
-    e.preventDefault(); if (!form.title.trim()) return;
-    if (modal.mode === 'edit') updateStory(modal.story.id, { title: form.title.trim(), theme: form.theme.trim() });
-    else addStory(form);
-    setModal(null);
-  };
-  const del = story => { if (window.confirm(`Supprimer définitivement « ${story.title} » dans cette démo ?`)) removeStory(story.id); };
-  const duplicate = story => { addStory({ title: `${story.title} — copie`, theme: story.theme }); };
+const fields=[
+  ['titre','Titre'],['sous_titre','Sous-titre'],['theme','Thème'],
+  ['description','Description'],['avertissement','Avertissement sensible']
+];
+const empty={ slug:'',numero:'',titre_fr:'',titre_mg:'',sous_titre_fr:'',sous_titre_mg:'',theme_fr:'',theme_mg:'',description_fr:'',description_mg:'',avertissement_fr:'',avertissement_mg:'',duree:'5 min',decisions_attendues:1,palette:'default',ordre:0 };
+function slug(s){return s.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[^a-z0-9]+/g,'-').replace(/(^-|-$)/g,'').slice(0,40)}
+function nextNumber(stories){const nums=new Set(stories.map(s=>s.numero));for(let i=1;i<=99;i++){const n=String(i).padStart(2,'0');if(!nums.has(n))return n;}return ''}
 
+export default function Tantara(){
+  const {stories,addStory,updateStory,removeStory,busy}=useAdmin();
+  const navigate=useNavigate();const [params]=useSearchParams();
+  const [search,setSearch]=useState(params.get('q')||'');
+  const [status,setStatus]=useState('all');
+  const [modal,setModal]=useState(null);
+  const [form,setForm]=useState(empty);
+  const [actionError,setActionError]=useState('');
+  useEffect(()=>setSearch(params.get('q')||''),[params]);
+  const filtered=useMemo(()=>stories.filter(s=>(status==='all'||s.status===status) && `${s.title} ${s.titleMg} ${s.theme}`.toLowerCase().includes(search.toLowerCase())),[stories,search,status]);
+  const create=()=>{setActionError('');setForm({...empty,numero:nextNumber(stories)});setModal({mode:'create'})};
+  const edit=s=>{setActionError('');setForm(Object.fromEntries(Object.keys(empty).map(k=>[k,s[k] ?? empty[k]])));setModal({mode:'edit',id:s.id})};
+  const save=async e=>{
+    e.preventDefault();setActionError('');
+    const payload={...form,decisions_attendues:Number(form.decisions_attendues),ordre:Number(form.ordre)};
+    if(modal.mode==='create' && (!payload.slug || !payload.numero)) {setActionError('Un slug et un numéro uniques sont nécessaires.');return}
+    try{if(modal.mode==='edit') await updateStory(modal.id,payload);else await addStory(payload);setModal(null)}
+    catch(err){setActionError(err.message)}
+  };
+  const del=async s=>{if(!window.confirm(`Supprimer définitivement « ${s.title} » et ses nœuds associés ?`))return;try{await removeStory(s.id)}catch(err){alert(err.message)}};
   return <div className="page-stack">
-    <div className="section-toolbar"><span className="section-hint">Catalogue éditorial</span><button className="btn btn-primary" onClick={openCreate}><Plus size={17}/> Nouveau Tantara</button></div>
+    <div className="section-toolbar"><span className="section-hint">Contenu réel Django · FR / MG obligatoire</span><button className="btn btn-primary" onClick={create}><Plus size={17}/> Nouveau Tantara</button></div>
     <div className="stats-grid compact-stats">
       <StatCard icon={BookOpen} label="Total" value={stories.length} note="Histoires" tone="purple"/>
-      <StatCard icon={Eye} label="Publiés" value={stories.filter(s=>s.status==='published').length} note="Disponibles" tone="blue"/>
+      <StatCard icon={Eye} label="Publiés" value={stories.filter(s=>s.status==='published').length} note="Référencés" tone="blue"/>
       <StatCard icon={Pencil} label="Brouillons" value={stories.filter(s=>s.status==='draft').length} note="À compléter" tone="purple"/>
-      <StatCard icon={GitBranch} label="Branches" value={stories.reduce((n,s)=>n+(s.graph?.edges?.length||0),0)} note="Liaisons du graphe" tone="blue"/>
+      <StatCard icon={GitBranch} label="À relire" value={stories.filter(s=>s.status==='review').length} note="Contrôles" tone="blue"/>
     </div>
-    <Panel title="Histoires" icon={BookOpen}>
-      <div className="table-toolbar"><label className="search-control"><Search size={16}/><input placeholder="Rechercher une histoire" value={search} onChange={e=>setSearch(e.target.value)}/></label><div className="filter-tabs">{[['all','Tous'],['published','Publiés'],['draft','Brouillons']].map(([k,label])=><button key={k} className={`filter-tab ${status===k?'selected':''}`} onClick={()=>setStatus(k)}>{label}</button>)}</div></div>
-      {filtered.length ? <div className="table-scroll"><table className="data-table"><thead><tr><th>Tantara</th><th>Langues</th><th>Nœuds</th><th>Statut</th><th>Actions</th></tr></thead><tbody>{filtered.map((story,index)=><tr key={story.id}>
-        <td><div className="table-name"><span className={`story-art art-${index%3}`}><BookOpen size={18}/></span><span><strong>{story.title}</strong><small>{story.theme}</small></span></div></td>
-        <td><span className="lang-tag">{story.language}</span></td><td>{story.graph?.nodes?.length||0}</td><td><Status value={story.status}/></td>
-        <td><div className="table-actions"><button title="Éditer" onClick={()=>openEdit(story)}><Pencil size={16}/></button><button title="Arbre narratif" onClick={()=>navigate(`/arbre?story=${encodeURIComponent(story.id)}`)}><GitBranch size={16}/></button><button title="Dupliquer (nouveau récit)" onClick={()=>duplicate(story)}><Copy size={16}/></button><button title="Supprimer" className="danger-hover" onClick={()=>del(story)}><Trash2 size={16}/></button></div></td>
-      </tr>)}</tbody></table></div> : <EmptyState title="Aucun résultat" description="Essayez un autre filtre ou créez une histoire."/>}
-      <div className="table-footer">{filtered.length} histoire(s) affichée(s) · données de démonstration</div>
+    <Panel title="Histoires" icon={BookOpen} action={<span className="muted">{filtered.length} résultat(s)</span>}>
+      <div className="table-toolbar"><label className="search-control"><Search size={16}/><input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Chercher un Tantara…"/></label>
+        <div className="filter-tabs">{[['all','Tous'],['published','Publiés'],['draft','Brouillons'],['review','À relire']].map(([v,t])=><button key={v} className={`filter-tab ${status===v?'selected':''}`} onClick={()=>setStatus(v)}>{t}</button>)}</div></div>
+      {filtered.length?<div className="data-table-wrap"><table className="data-table"><thead><tr><th>Tantara</th><th>Thème</th><th>Révision</th><th>Statut</th><th>Actions</th></tr></thead><tbody>
+        {filtered.map(s=><tr key={s.id}><td><strong>{s.title}</strong><small>{s.titre_mg || s.slug}</small></td><td>{s.theme}</td><td>{s.revision || '1.0'}</td><td><Status value={s.status}/></td><td><div className="table-actions"><button title="Éditer les détails" onClick={()=>edit(s)}><Pencil size={16}/></button><button title="Éditer l’arbre" onClick={()=>navigate(`/arbre?story=${encodeURIComponent(s.id)}`)}><GitBranch size={16}/></button><button title="Supprimer" onClick={()=>del(s)}><Trash2 size={16}/></button></div></td></tr>)}
+      </tbody></table></div>:<EmptyState title="Aucune histoire" description="Ajoutez un Tantara ou modifiez les filtres."/>}
+      <div className="table-footer">Contenus enregistrés sur Django · aucune progression de joueur collectée</div>
     </Panel>
-    {modal && <Dialog title={modal.mode === 'edit' ? 'Modifier le Tantara' : 'Nouveau Tantara'} onClose={()=>setModal(null)}><form onSubmit={save} className="form-stack"><Field label="Titre"><input required maxLength={120} value={form.title} onChange={e=>setForm(f=>({...f,title:e.target.value}))} placeholder="Titre du récit"/></Field><Field label="Thème"><input maxLength={140} value={form.theme} onChange={e=>setForm(f=>({...f,theme:e.target.value}))} placeholder="Cyberharcèlement, sextorsion..."/></Field><div className="form-actions"><button type="button" className="btn btn-outline" onClick={()=>setModal(null)}>Annuler</button><button className="btn btn-primary" type="submit">Enregistrer</button></div></form></Dialog>}
+    {modal&&<Dialog title={modal.mode==='create'?'Créer un Tantara':'Modifier le Tantara'} onClose={()=>setModal(null)}><form className="form-stack" onSubmit={save}>
+      <div className="form-two"><Field label="Identifiant (slug)"><input value={form.slug} required maxLength={40} onChange={e=>setForm(p=>({...p,slug:slug(e.target.value)}))}/></Field><Field label="Numéro (01–99)"><input required maxLength={2} pattern="[0-9]{2}" value={form.numero} onChange={e=>setForm(p=>({...p,numero:e.target.value}))}/></Field></div>
+      {fields.map(([key,label])=><div className="form-two" key={key}><Field label={`${label} · Français`}>{['description','avertissement'].includes(key)?<textarea required rows={2} value={form[`${key}_fr`]} onChange={e=>setForm(p=>({...p,[`${key}_fr`]:e.target.value}))}/>:<input required value={form[`${key}_fr`]} onChange={e=>setForm(p=>({...p,[`${key}_fr`]:e.target.value, ...(key==='titre'&&modal.mode==='create'&&!p.slug?{slug:slug(e.target.value)}:{})}))}/>}</Field><Field label={`${label} · Malagasy`}>{['description','avertissement'].includes(key)?<textarea required rows={2} value={form[`${key}_mg`]} onChange={e=>setForm(p=>({...p,[`${key}_mg`]:e.target.value}))}/>:<input required value={form[`${key}_mg`]} onChange={e=>setForm(p=>({...p,[`${key}_mg`]:e.target.value}))}/>}</Field></div>)}
+      <div className="form-two"><Field label="Durée indicative"><input required value={form.duree} onChange={e=>setForm(p=>({...p,duree:e.target.value}))}/></Field><Field label="Décisions attendues par parcours"><input required type="number" min="1" max="30" value={form.decisions_attendues} onChange={e=>setForm(p=>({...p,decisions_attendues:e.target.value}))}/></Field></div>
+      {actionError&&<p role="alert" className="api-error">{actionError}</p>}
+      <div className="form-actions"><button type="button" className="btn btn-outline" onClick={()=>setModal(null)}>Annuler</button><button disabled={busy} className="btn btn-primary">{busy?'Enregistrement…':'Enregistrer'}</button></div>
+    </form></Dialog>}
   </div>;
 }

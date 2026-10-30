@@ -4,6 +4,9 @@ import { Background, BackgroundVariant, Controls, Handle, Position, ReactFlow, a
 import { BookOpen, CheckCircle2, Flag, GitBranch, Plus, Save, Trash2, Unplug } from 'lucide-react';
 import { Field, Panel, Status } from '../components/UI';
 import { useAdmin } from '../lib/store';
+import { storyApi } from '../services/editor';
+import { newGraph } from '../data/seed';
+import { apiError } from '../services/api';
 
 const nodeTypes = { story: StoryNode };
 function StoryNode({ data, selected }) {
@@ -34,15 +37,31 @@ function validateGraph(graph) {
 }
 
 export default function StoryTree() {
-  const { stories, updateStory } = useAdmin();
+  const { stories, refresh } = useAdmin();
+  const [revision,setRevision]=useState(0);
+  const [loading,setLoading]=useState(false);
+  const [saving,setSaving]=useState(false);
+  const [message,setMessage]=useState('');
   const [params, setParams] = useSearchParams();
   const story = stories.find(s=>s.id === params.get('story')) || stories[0];
-  const [nodes, setNodes] = useState(story?.graph?.nodes || []);
-  const [edges, setEdges] = useState(story?.graph?.edges || []);
+  const [nodes, setNodes] = useState([]);
+  const [edges, setEdges] = useState([]);
   const [selectedId, setSelectedId] = useState(null);
   const [language, setLanguage] = useState('fr');
   const [dirty, setDirty] = useState(false);
-  useEffect(() => { setNodes(story?.graph?.nodes || []); setEdges(story?.graph?.edges || []); setSelectedId(null); setDirty(false); }, [story?.id]);
+  useEffect(() => {
+    let active=true;
+    if(!story) return;
+    setLoading(true);setMessage('');setSelectedId(null);setDirty(false);
+    storyApi.graph(story.id).then(({data})=>{
+      if(!active)return;
+      const isNew=!data.graph?.nodes?.length;
+      const graph=isNew ? newGraph(story.title) : data.graph;
+      setNodes(graph.nodes);setEdges(graph.edges);setRevision(data.revision || 0);
+      setDirty(isNew);
+    }).catch(e=>{if(active)setMessage(apiError(e))}).finally(()=>{if(active)setLoading(false)});
+    return ()=>{active=false};
+  }, [story?.id]);
   const selected = nodes.find(n=>n.id===selectedId);
   const issues = useMemo(()=>validateGraph({nodes,edges}),[nodes,edges]);
   const onNodesChange = useCallback(changes=>{setNodes(old=>applyNodeChanges(changes,old));if(changes.some(c=>c.type!=='select'))setDirty(true);},[]);
@@ -51,34 +70,52 @@ export default function StoryTree() {
   const modifySelected = (patch) => { setNodes(prev => prev.map(n => n.id===selectedId ? {...n,data:{...n.data,...patch}} : n)); setDirty(true); };
   const addNode = kind => {
     const id = `${kind}-${Date.now()}`;
-    const node = { id, type:'story', position:{ x: 180+(nodes.length%3)*185, y: 120+nodes.length*58 }, data: {kind,title:{fr:`Nouvelle ${kind==='scene'?'scène':kind==='decision'?'décision':'fin'}`,mg:''}, text:{fr:'',mg:''},...(kind==='decision'?{options:[{id:`option-${Date.now()}`,label:{fr:'Choix 1',mg:''}}]}:{})} };
+    const node = { id, type:'story', position:{ x: 180+(nodes.length%3)*185, y: 120+nodes.length*58 }, data: {kind,title:{fr:`Nouvelle ${kind==='scene'?'scène':kind==='decision'?'décision':'fin'}`,mg:''}, text:{fr:'',mg:''},...(kind==='decision'?{options:[{id:`option-${Date.now()}`,label:{fr:'Choix 1',mg:''},feedback:{fr:'',mg:''},quality:0}]}:{})} };
     setNodes(prev=>[...prev,node]);setSelectedId(id);setDirty(true);
   };
   const addOption = () => {
     if (!selected || selected.data.kind !== 'decision') return;
-    const options = [...(selected.data.options||[]),{id:`opt-${Date.now()}`,label:{fr:`Choix ${(selected.data.options||[]).length+1}`,mg:''}}];
+    const options = [...(selected.data.options||[]),{id:`opt-${Date.now()}`,label:{fr:`Choix ${(selected.data.options||[]).length+1}`,mg:''},feedback:{fr:'',mg:''},quality:0}];
     modifySelected({options});
   };
   const deleteNode = () => {if(!selected)return;setNodes(prev=>prev.filter(n=>n.id!==selectedId));setEdges(prev=>prev.filter(e=>e.source!==selectedId && e.target!==selectedId));setSelectedId(null);setDirty(true);};
-  const save = () => {if(!story)return; updateStory(story.id,{graph:{nodes,edges}});setDirty(false);};
+  const save = async () => {
+    if(!story||saving)return;
+    setSaving(true);setMessage('');
+    try {
+      const {data}=await storyApi.saveGraph(story.id,{nodes,edges},revision);
+      setRevision(data.revision);setDirty(false);
+      setMessage('Brouillon graphique enregistré sur Django.');
+    } catch(e){setMessage(apiError(e));}
+    finally{setSaving(false)}
+  };
+  const apply = async () => {
+    if(!story||dirty)return;
+    if(!window.confirm('Appliquer le brouillon graphique aux nœuds relationnels Django ? Les versions déjà publiées restent figées.'))return;
+    setSaving(true);setMessage('');
+    try {const {data}=await storyApi.applyGraph(story.id);await refresh();setMessage(`${data.nodes} nœuds appliqués. Relecture et approbation encore nécessaires.`)}
+    catch(e){setMessage(apiError(e))}finally{setSaving(false)}
+  };
 
   if (!story) return <Panel title="Aucun Tantara"><p>Créez d’abord une histoire.</p></Panel>;
   return <div className="page-stack">
-    <div className="tree-bar"><div className="inline-fields"><Field label="Histoire"><select value={story.id} onChange={e=>{if(dirty && !confirm('Abandonner les changements non enregistrés ?'))return;setParams({story:e.target.value})}}>{stories.map(s=><option value={s.id} key={s.id}>{s.title}</option>)}</select></Field><span className="subtle-vertical"/><span className="tree-counter">{nodes.length} nœuds · {edges.length} liaisons</span></div><button className="btn btn-primary" onClick={save} disabled={!dirty}><Save size={17}/> {dirty?'Enregistrer':'Enregistré'}</button></div>
+    {message && <div role="status" className="api-banner">{message}</div>}
+    <div className="tree-bar"><div className="inline-fields"><Field label="Histoire"><select value={story.id} onChange={e=>{if(dirty && !confirm('Abandonner les changements non enregistrés ?'))return;setParams({story:e.target.value})}}>{stories.map(s=><option value={s.id} key={s.id}>{s.title}</option>)}</select></Field><span className="subtle-vertical"/><span className="tree-counter">{nodes.length} nœuds · {edges.length} liaisons</span></div><div className="tree-toolbar-actions"><button className="btn btn-outline" onClick={apply} disabled={saving||loading||dirty}>Appliquer au backend</button><button className="btn btn-primary" onClick={save} disabled={saving||loading||!dirty}><Save size={17}/> {saving?'Traitement…':dirty?'Enregistrer':'Enregistré'}</button></div></div>
     <div className="tree-layout"><Panel title="Éditeur narratif" icon={GitBranch} className="flow-panel" action={<div className="flow-add"><button title="Ajouter une scène" onClick={()=>addNode('scene')}><Plus size={15}/> Scène</button><button title="Ajouter une décision" onClick={()=>addNode('decision')}><Plus size={15}/> Décision</button><button title="Ajouter une fin" onClick={()=>addNode('ending')}><Plus size={15}/> Fin</button></div>}>
-      <div className="flow-canvas"><ReactFlow nodes={nodes} edges={edges} nodeTypes={nodeTypes} onNodesChange={onNodesChange} onEdgesChange={onEdgesChange} onConnect={onConnect} onNodeClick={(_,n)=>setSelectedId(n.id)} onPaneClick={()=>setSelectedId(null)} fitView nodesConnectable elementsSelectable snapToGrid snapGrid={[15,15]} defaultEdgeOptions={{type:'smoothstep',style:{stroke:'#40aefc',strokeWidth:1.7}}} colorMode="dark">
+      <div className="flow-canvas">{loading?<div className="loading-screen">Chargement du graphe…</div>:<ReactFlow nodes={nodes} edges={edges} nodeTypes={nodeTypes} onNodesChange={onNodesChange} onEdgesChange={onEdgesChange} onConnect={onConnect} onNodeClick={(_,n)=>setSelectedId(n.id)} onPaneClick={()=>setSelectedId(null)} fitView nodesConnectable elementsSelectable snapToGrid snapGrid={[15,15]} defaultEdgeOptions={{type:'smoothstep',style:{stroke:'#40aefc',strokeWidth:1.7}}} colorMode="dark">
         <Background variant={BackgroundVariant.Dots} gap={24} size={1} color="#23344e"/><Controls showInteractive={false}/>
-      </ReactFlow></div>
+      </ReactFlow>}</div>
     </Panel><Panel title="Propriétés du nœud" icon={BookOpen} className="inspector-panel">
       {selected ? <div className="inspector-fields"><div className="inspector-badge">{selected.data.kind.toUpperCase()}</div><div className="lang-switch"><button className={language==='fr'?'selected':''} onClick={()=>setLanguage('fr')}>Français</button><button className={language==='mg'?'selected':''} onClick={()=>setLanguage('mg')}>Malagasy</button></div>
         <Field label="Titre"><input value={selected.data.title?.[language]||''} onChange={e=>modifySelected({title:{...selected.data.title,[language]:e.target.value}})}/></Field>
         <Field label="Texte"><textarea rows={4} value={selected.data.text?.[language]||''} onChange={e=>modifySelected({text:{...selected.data.text,[language]:e.target.value}})}/></Field>
-        {selected.data.kind==='decision'&&<div className="option-editor"><div className="panel-title">Choix</div>{(selected.data.options||[]).map((o,i)=><div key={o.id} className="option-edit-row"><input aria-label={`Choix ${i+1}`} value={o.label?.[language]||''} onChange={e=>modifySelected({options:selected.data.options.map(x=>x.id===o.id?{...x,label:{...x.label,[language]:e.target.value}}:x)})}/><button title="Retirer le choix" className="icon-button" onClick={()=>{modifySelected({options:selected.data.options.filter(x=>x.id!==o.id)});setEdges(es=>es.filter(e=>!(e.source===selected.id && e.sourceHandle===o.id)));}}><Trash2 size={14}/></button></div>)}<button className="btn btn-outline full-width" onClick={addOption}><Plus size={15}/> Ajouter un choix</button></div>}
+        {selected.data.kind==='decision'&&<Field label="Poids de la décision"><input type="number" min="1" max="100" value={selected.data.weight||20} onChange={e=>modifySelected({weight:Number(e.target.value)||20})}/></Field>}
+        {selected.data.kind==='decision'&&<div className="option-editor"><div className="panel-title">Choix</div>{(selected.data.options||[]).map((o,i)=><div key={o.id} className="option-edit-row"><input aria-label={`Choix ${i+1}`} value={o.label?.[language]||''} onChange={e=>modifySelected({options:selected.data.options.map(x=>x.id===o.id?{...x,label:{...x.label,[language]:e.target.value}}:x)})}/><button title="Retirer le choix" className="icon-button" onClick={()=>{modifySelected({options:selected.data.options.filter(x=>x.id!==o.id)});setEdges(es=>es.filter(e=>!(e.source===selected.id && e.sourceHandle===o.id)));}}><Trash2 size={14}/></button></div>)}{(selected.data.options||[]).map((o,i)=><div key={`${o.id}-feedback`} className="option-feedback-row"><label>Retour pédagogique {i+1} · {language.toUpperCase()}<textarea rows={2} value={o.feedback?.[language]||''} onChange={e=>modifySelected({options:selected.data.options.map(x=>x.id===o.id?{...x,feedback:{...x.feedback,[language]:e.target.value}}:x)})}/></label><label>Qualité (0–1)<input type="number" min="0" max="1" step="0.1" value={o.quality??0} onChange={e=>modifySelected({options:selected.data.options.map(x=>x.id===o.id?{...x,quality:Number(e.target.value)}:x)})}/></label></div>)}<button className="btn btn-outline full-width" onClick={addOption}><Plus size={15}/> Ajouter un choix</button></div>}
         <button className="btn btn-danger full-width" onClick={deleteNode}><Trash2 size={16}/> Supprimer ce nœud</button>
       </div> : <div className="inspector-placeholder"><GitBranch size={28}/><strong>Sélectionner un nœud</strong><p>Modifiez le texte, les traductions et les options. Reliez les points des cartes pour créer une branche.</p></div>}
     </Panel></div>
     <Panel title="Validation de l’histoire" icon={issues.length ? Unplug : CheckCircle2}>
-      {issues.length ? <div className="validation-list">{issues.slice(0,6).map((s,i)=><span key={i} className="validation-item">● {s}</span>)}{issues.length>6&&<span>+ {issues.length-6} autres vérifications</span>}</div> : <div className="validation-success"><CheckCircle2 size={18}/> Les contrôles de base sont satisfaits. Vérification éditoriale humaine encore nécessaire.</div>}
+      {issues.length ? <div className="validation-list">{issues.slice(0,6).map((s,i)=><span key={i} className="validation-item">● {s}</span>)}{issues.length>6&&<span>+ {issues.length-6} autres vérifications</span>}</div> : <div className="validation-success"><CheckCircle2 size={18}/> Contrôles visuels satisfaits ; appliquer au backend pour les validations métier complètes.</div>}
     </Panel>
   </div>;
 }
