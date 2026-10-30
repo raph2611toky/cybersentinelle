@@ -1,0 +1,11 @@
+.venv/
+.env
+__pycache__/
+*.py[cod]
+*.sqlite3
+.pytest_cache/
+staticfiles/
+media/*
+!media/.gitkeep
+content/releases/*
+!content/releases/.gitkeep
