@@ -117,6 +117,8 @@ class SceneMedia(ModeleBase):
 
     def clean(self):
         super().clean()
+        if self.noeud_id and self.noeud.type not in ('SCENE', 'ENDING'):
+            raise ValidationError({'noeud': 'Une vidéo ou une narration ne peut être associée qu’à une scène ou une fin.'})
         checks = [('image', MediaAsset.Kind.IMAGE), ('video', MediaAsset.Kind.VIDEO),
                   ('audio', MediaAsset.Kind.AUDIO), ('sous_titres', MediaAsset.Kind.SUBTITLE),
                   ('video_finale', MediaAsset.Kind.VIDEO)]

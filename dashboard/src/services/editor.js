@@ -46,6 +46,7 @@ export const studioApi = {
   createVoice: data => api.post(`${studio}/voices/create/`, data),
   scenes: () => allPages(`${studio}/scenes/`),
   createScene: data => api.post(`${studio}/scenes/create/`, data),
+  updateScene: (id, data) => api.patch(`${studio}/scenes/${id}/update/`, data),
   render: id => api.post(`${studio}/scenes/${id}/render/`, {}),
   tts: data => api.post(`${studio}/voices/generate/`, data),
   jobs: () => allPages(`${studio}/jobs/`),

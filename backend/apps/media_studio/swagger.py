@@ -50,8 +50,8 @@ media_delete_doc = swagger_auto_schema(operation_summary='Supprimer un média no
     openapi.Schema(type=openapi.TYPE_OBJECT, properties={'deleted': openapi.Schema(type=openapi.TYPE_BOOLEAN)})))
 scene_list_doc = swagger_auto_schema(operation_summary='Lister les médias des nœuds (filtre ?noeud=UUID)', tags=['Studio / Scènes'], responses=responses(SceneListResponseSerializer()))
 scene_detail_doc = swagger_auto_schema(operation_summary='Consulter le montage d’un nœud', tags=['Studio / Scènes'], responses=responses(obj(SceneSerializer)))
-scene_create_doc = swagger_auto_schema(operation_summary='Créer le montage d’une scène', tags=['Studio / Scènes'], request_body=SceneSerializer, responses=responses(obj(SceneSerializer), 201))
-scene_patch_doc = swagger_auto_schema(operation_summary='Modifier le montage d’une scène', tags=['Studio / Scènes'], request_body=SceneSerializer, responses=responses(obj(SceneSerializer)))
+scene_create_doc = swagger_auto_schema(operation_summary='Créer le montage d’une scène ou d’une fin', tags=['Studio / Scènes'], request_body=SceneSerializer, responses=responses(obj(SceneSerializer), 201))
+scene_patch_doc = swagger_auto_schema(operation_summary='Modifier le montage d’une scène ou d’une fin', tags=['Studio / Scènes'], request_body=SceneSerializer, responses=responses(obj(SceneSerializer)))
 voice_list_doc = swagger_auto_schema(operation_summary='Lister les profils vocaux', tags=['Studio / Voix'], responses=responses(VoiceListResponseSerializer()))
 voice_create_doc = swagger_auto_schema(operation_summary='Enregistrer une voix Gemini / ElevenLabs', tags=['Studio / Voix'], request_body=VoiceSerializer, responses=responses(obj(VoiceSerializer), 201))
 tts_doc = swagger_auto_schema(operation_summary='Mettre en file une génération TTS FR/MG', tags=['Studio / Voix'],

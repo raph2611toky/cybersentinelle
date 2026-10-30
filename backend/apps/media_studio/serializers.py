@@ -45,6 +45,12 @@ class SceneSerializer(ValidatedModelSerializer):
         return request.build_absolute_uri(path) if request else path
 
     def validate(self, attrs):
+        # Les scènes ET les fins peuvent avoir une vidéo, jamais les décisions.
+        node = attrs.get('noeud', getattr(self.instance, 'noeud', None))
+        if node is not None and node.type not in ('SCENE', 'ENDING'):
+            raise serializers.ValidationError({'noeud': 'Les médias sont réservés aux scènes et aux fins.'})
+        if self.instance is not None and 'noeud' in attrs and attrs['noeud'].pk != self.instance.noeud_id:
+            raise serializers.ValidationError({'noeud': 'Le nœud ne peut pas être modifié : créez un autre montage.'})
         attrs['statut'] = SceneMedia.Status.DRAFT
         return super().validate(attrs)
 

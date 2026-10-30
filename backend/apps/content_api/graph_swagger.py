@@ -9,7 +9,8 @@ simple_graph=openapi.Schema(type=openapi.TYPE_OBJECT,required=['nodes','edges'],
 graph_response=openapi.Schema(type=openapi.TYPE_OBJECT,properties={
     'graph':simple_graph,'revision':openapi.Schema(type=openapi.TYPE_INTEGER),
 'draft_id':openapi.Schema(type=openapi.TYPE_STRING, read_only=True),
-'translation_state':openapi.Schema(type=openapi.TYPE_OBJECT)})
+'translation_state':openapi.Schema(type=openapi.TYPE_OBJECT),
+'node_id_map':openapi.Schema(type=openapi.TYPE_OBJECT, description='Correspondance des clés React Flow avec les UUID des nœuds Django déjà appliqués', additional_properties=openapi.Schema(type=openapi.TYPE_STRING, format='uuid'))})
 graph_input=openapi.Schema(type=openapi.TYPE_OBJECT,required=['graph','revision'],properties={
     'graph':simple_graph,'revision':openapi.Schema(type=openapi.TYPE_INTEGER,minimum=0)})
 error=openapi.Schema(type=openapi.TYPE_OBJECT,properties={

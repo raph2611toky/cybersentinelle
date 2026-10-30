@@ -23,7 +23,8 @@ class GraphReadAPIView(APIView):
             ensure_model_permission(request,OptionDecision,'view')
             draft=BrouillonGraphe.objects.filter(tantara=story).first()
             return Response({'graph':draft.graphe if draft else relational_graph(story),'revision':draft.revision if draft else 0, 'draft_id':str(draft.pk) if draft else None,
-                'translation_state':job_summary('content_api.BrouillonGraphe',draft.pk) if draft else {'state':'NONE','pending':0,'failed':0,'translated':0}})
+                'translation_state':job_summary('content_api.BrouillonGraphe',draft.pk) if draft else {'state':'NONE','pending':0,'failed':0,'translated':0},
+                'node_id_map':{node.cle:str(node.pk) for node in story.noeuds.only('id','cle')}})
         except Exception as exc:return handle_editor_exception(exc)
 
 class GraphSaveAPIView(APIView):

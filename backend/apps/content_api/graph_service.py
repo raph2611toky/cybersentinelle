@@ -136,6 +136,13 @@ def apply_graph(story, graph):
     with transaction.atomic():
         old={n.cle:n for n in Noeud.objects.select_for_update().filter(tantara=story)}
         removed=[n for key,n in old.items() if key not in mapping]
+        # Un nœud éditorial contenant une vidéo ne doit pas devenir une décision :
+        # seuls SCENE et ENDING sont des supports média.
+        converted_with_media=[key for key,n in old.items()
+                              if key in mapping and mapping[key]['data']['kind']=='decision'
+                              and n.scene_media.exists()]
+        if converted_with_media:
+            raise APIValidationError({'graph':['Retirer les médias avant de transformer un nœud en décision : '+', '.join(converted_with_media)]})
         if any(n.scene_media.exists() for n in removed):
             raise APIValidationError({'graph':['Nœud supprimé associé à un média : retirer/réaffecter le média avant application']})
         # Les options existantes sont reconstruites après les nœuds ; pas de modification
