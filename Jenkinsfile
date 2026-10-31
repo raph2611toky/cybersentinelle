@@ -14,8 +14,8 @@ pipeline {
         REDIS_DOCKER_NAME      = 'safidiko-redis'
 
         APP_NETWORK = 'safidiko-network'
-        BACKEND_PORT = '8465'
-        DASHBOARD_PORT = '8463'
+        BACKEND_PORT = '8466'
+        DASHBOARD_PORT = '8467'
 
         SAFIDIKO_ENV  = '/var/lib/jenkins/secrets/safidiko'
         BACKEND_ENV   = '/var/lib/jenkins/secrets/safidiko/backend.env'
