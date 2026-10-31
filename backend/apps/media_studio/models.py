@@ -67,6 +67,7 @@ class VoiceProfile(ModeleBase):
     class Provider(models.TextChoices):
         GEMINI = 'GEMINI', 'Gemini Developer API'
         ELEVENLABS = 'ELEVENLABS', 'ElevenLabs'
+        GOOGLE_CLOUD = 'GOOGLE_CLOUD', 'Google Cloud Text-to-Speech'
 
     nom = models.CharField(max_length=100)
     langue = models.ForeignKey(Langue, on_delete=models.PROTECT, related_name='voix_studio')
@@ -90,6 +91,7 @@ class SceneMedia(ModeleBase):
         VIDEO_ORIGINAL = 'VIDEO_ORIGINAL', 'Vidéo avec audio incorporé'
         VIDEO_AUDIO = 'VIDEO_AUDIO', 'Vidéo et audio séparés'
         IMAGE_AUDIO = 'IMAGE_AUDIO', 'Image et audio'
+        AUDIO_ONLY = 'AUDIO_ONLY', 'Audio seul'
         TEXT_ONLY = 'TEXT_ONLY', 'Texte uniquement'
 
     class Status(models.TextChoices):
@@ -106,6 +108,18 @@ class SceneMedia(ModeleBase):
     audio = models.ForeignKey(MediaAsset, null=True, blank=True, on_delete=models.PROTECT, related_name='scene_audios')
     sous_titres = models.ForeignKey(MediaAsset, null=True, blank=True, on_delete=models.PROTECT, related_name='scene_subtitles')
     video_finale = models.ForeignKey(MediaAsset, null=True, blank=True, on_delete=models.PROTECT, related_name='scene_renders')
+    audio_finale = models.ForeignKey(MediaAsset, null=True, blank=True, on_delete=models.PROTECT, related_name='scene_audio_renders')
+
+    class SyncMode(models.TextChoices):
+        FREEZE_LAST = 'FREEZE_LAST', 'Durées libres : figer la dernière image après la vidéo'
+        SPEED = 'SPEED', 'Vitesse pour ajuster la narration entière'
+        TRIM = 'TRIM', 'Découper un segment (vitesse normale)'
+        TRIM_SPEED = 'TRIM_SPEED', 'Découper puis ajuster la vitesse'
+
+    sync_mode = models.CharField(max_length=12, choices=SyncMode.choices, default=SyncMode.FREEZE_LAST)
+    audio_trim_start_ms = models.PositiveIntegerField(default=0)
+    audio_trim_end_ms = models.PositiveIntegerField(null=True, blank=True)
+
     narration_texte = models.TextField(blank=True)
     voix = models.ForeignKey(VoiceProfile, null=True, blank=True, on_delete=models.PROTECT, related_name='scenes')
     statut = models.CharField(max_length=12, choices=Status.choices, default=Status.DRAFT)
@@ -121,7 +135,7 @@ class SceneMedia(ModeleBase):
             raise ValidationError({'noeud': 'Une vidéo ou une narration ne peut être associée qu’à une scène ou une fin.'})
         checks = [('image', MediaAsset.Kind.IMAGE), ('video', MediaAsset.Kind.VIDEO),
                   ('audio', MediaAsset.Kind.AUDIO), ('sous_titres', MediaAsset.Kind.SUBTITLE),
-                  ('video_finale', MediaAsset.Kind.VIDEO)]
+                  ('video_finale', MediaAsset.Kind.VIDEO), ('audio_finale', MediaAsset.Kind.AUDIO)]
         for attr, expected in checks:
             media = getattr(self, attr, None)
             if media and media.type != expected:
@@ -134,8 +148,15 @@ class SceneMedia(ModeleBase):
             raise ValidationError({'video': 'Vidéo requise.'})
         if self.mode == self.Mode.IMAGE_AUDIO and not self.image_id:
             raise ValidationError({'image': 'Image requise.'})
-        if self.statut == self.Status.READY and self.mode != self.Mode.TEXT_ONLY and not self.video_finale_id:
-            raise ValidationError('Un rendu final est nécessaire avant publication.')
+        if self.audio_trim_end_ms is not None and self.audio_trim_end_ms <= self.audio_trim_start_ms:
+            raise ValidationError({'audio_trim_end_ms': 'La fin doit être après le début du segment.'})
+        if self.mode == self.Mode.AUDIO_ONLY and (self.image_id or self.video_id):
+            raise ValidationError({'mode': 'Le mode audio seul ne doit pas contenir de visuel.'})
+        if self.statut == self.Status.READY:
+            if self.mode == self.Mode.AUDIO_ONLY and not self.audio_finale_id:
+                raise ValidationError('Un rendu audio final est nécessaire avant publication.')
+            if self.mode not in {self.Mode.TEXT_ONLY, self.Mode.AUDIO_ONLY} and not self.video_finale_id:
+                raise ValidationError('Un rendu vidéo final est nécessaire avant publication.')
 
     def __str__(self):
         return f'{self.noeud.tantara.slug}:{self.noeud.cle}/{self.langue.code}'
