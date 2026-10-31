@@ -5,9 +5,9 @@ from helpers.api.swagger import ERROR_RESPONSES
 public_media_doc = swagger_auto_schema(
     operation_summary='Lire un clip d’une publication validée (réponse binaire)',
     tags=['Tantara / Médias publics'],
-    produces=['video/mp4'],
+    produces=['video/mp4', 'audio/mpeg'],
     responses={
-        200: openapi.Response('Flux vidéo MP4 public (aucun corps JSON)'),
+        200: openapi.Response('Flux MP4 vidéo ou MP3 audio publié (aucun corps JSON)'),
         **ERROR_RESPONSES,
         503: openapi.Response('Publication non disponible', ERROR_RESPONSES[500].schema),
     },

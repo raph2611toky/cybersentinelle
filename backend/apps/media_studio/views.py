@@ -320,7 +320,7 @@ class ScenePatchAPIView(APIView):
                 return conflict()
             s = SceneSerializer(obj, data=request.data, partial=True, context={'request': request})
             s.is_valid(raise_exception=True)
-            obj = s.save(video_finale=None, statut=SceneMedia.Status.DRAFT)
+            obj = s.save(video_finale=None, audio_finale=None, statut=SceneMedia.Status.DRAFT)
             return Response(SceneSerializer(obj, context={'request': request}).data)
         except (serializers.ValidationError, DjangoValidationError) as exc:
             return invalid(exc)
@@ -417,7 +417,7 @@ class RenderCreateAPIView(APIView):
             scene = get_object_or_404(SceneMedia, pk=pk)
             if scene.mode == SceneMedia.Mode.TEXT_ONLY:
                 return error(400, 'BAD_REQUEST', 'Aucun média à assembler')
-            if scene.mode in {SceneMedia.Mode.IMAGE_AUDIO, SceneMedia.Mode.VIDEO_AUDIO} and not scene.audio_id:
+            if scene.mode in {SceneMedia.Mode.IMAGE_AUDIO, SceneMedia.Mode.VIDEO_AUDIO, SceneMedia.Mode.AUDIO_ONLY} and not scene.audio_id:
                 complete_lines = scene.dialogues.exists() and not scene.dialogues.filter(audio__isnull=True).exists()
                 if not complete_lines:
                     return error(400, 'BAD_REQUEST', 'Générer ou importer la narration avant le rendu : aucun TTS implicite facturable.')

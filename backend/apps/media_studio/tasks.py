@@ -8,7 +8,7 @@ from celery import shared_task
 from .models import GenerationJob, MediaAsset, SceneMedia
 from .providers.tts import synthesize, ProviderError
 from .services.media import persist_generated, persist_upload
-from .services.video import render_scene, RenderError
+from .services.video import render_scene, render_audio_only, RenderError
 
 LOG = logging.getLogger('safidiko')
 
@@ -44,24 +44,32 @@ def process_studio_job(job_id):
                 scene.save(update_fields=['audio', 'statut', 'updated_at'])
                 # Après une synthèse explicite, préparer un rendu FFmpeg automatiquement si visuel présent.
                 # Le rendu utilise l'audio existant (pas un second appel TTS payant).
-                if scene.mode in {SceneMedia.Mode.IMAGE_AUDIO, SceneMedia.Mode.VIDEO_AUDIO}:
+                if scene.mode in {SceneMedia.Mode.IMAGE_AUDIO, SceneMedia.Mode.VIDEO_AUDIO, SceneMedia.Mode.AUDIO_ONLY}:
                     auto_render_after_tts = True
                 else:
                     auto_render_after_tts = False
         elif job.type == GenerationJob.Type.RENDER:
-            payload = render_scene(scene)
+            audio_only = scene.mode == SceneMedia.Mode.AUDIO_ONLY
+            payload = render_audio_only(scene) if audio_only else render_scene(scene)
             used_media = [scene.image, scene.video, scene.audio]
             if not scene.audio_id:
                 used_media += [line.audio for line in scene.dialogues.select_related('audio')]
-            asset = persist_upload(ContentFile(payload, name='render.mp4'), MediaAsset.Kind.VIDEO,
+            asset = persist_upload(
+                ContentFile(payload, name='render.mp3' if audio_only else 'render.mp4'),
+                MediaAsset.Kind.AUDIO if audio_only else MediaAsset.Kind.VIDEO,
                 title=f'Clip {scene.noeud.cle} {scene.langue.code}',
                 licence='Montage interne à partir des médias éditoriaux vérifiés',
                 langue=scene.langue, origin=MediaAsset.Origin.RENDER,
                 rights_confirmed=all(x.droits_confirmes for x in used_media if x))
-            scene.video_finale = asset
+            if audio_only:
+                scene.audio_finale = asset
+                scene.video_finale = None
+            else:
+                scene.video_finale = asset
+                scene.audio_finale = None
             scene.statut = SceneMedia.Status.READY
             scene.full_clean()
-            scene.save(update_fields=['video_finale', 'statut', 'updated_at'])
+            scene.save(update_fields=['video_finale', 'audio_finale', 'statut', 'updated_at'])
         else:
             raise RenderError('JOB_TYPE_UNSUPPORTED')
         job.resultat = asset

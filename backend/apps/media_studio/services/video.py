@@ -1,14 +1,17 @@
-"""FFprobe et rendu déterministe : narration synchronisée et jamais tronquée par -shortest.
+"""Montage FFmpeg sûr : ajuste EXPLICITEMENT l'audio à la durée vidéo.
 
-Cas pris en charge : vidéo avec son d'origine, vidéo + narration, image + narration,
-plusieurs répliques concaténées. Une bande son plus longue que la vidéo gèle sa dernière
-image ; une bande son plus courte est complétée par du silence. Aucune voix synthétisée ici.
+Mode SPEED: lecture de tout l'audio à la vitesse exacte nécessaire.
+Mode TRIM: coupe un segment exactement égal à la durée vidéo, vitesse 1x.
+Mode TRIM_SPEED: coupe [début, fin], puis ajuste sa vitesse à la vidéo.
+Mode AUDIO_ONLY: aucun visuel artificiel ; export MP3 autonome.
+La durée et les flux sont vérifiés avec ffprobe avant de persister le résultat.
 """
 import json
 import math
 import subprocess
 import tempfile
 from pathlib import Path
+
 from django.conf import settings
 
 
@@ -45,101 +48,169 @@ def duration_sec(filepath, expected):
     return duration
 
 
-def render_scene(scene):
-    """Produit MP4, en maintenant la vidéo visible toute la durée de l'audio.
+def _run(command):
+    try:
+        subprocess.run(command, check=True, capture_output=True, timeout=settings.STUDIO_RENDER_TIMEOUT)
+    except FileNotFoundError:
+        raise RenderError('FFMPEG_NOT_INSTALLED') from None
+    except subprocess.TimeoutExpired:
+        raise RenderError('RENDER_TIMEOUT') from None
+    except subprocess.CalledProcessError:
+        raise RenderError('RENDER_FAILED') from None
 
-    Tous les délais sont lus avec ffprobe : ne pas se fier à un nombre de mots,
-    au nombre de caractères ou au titre du média pour calculer la narration.
-    """
+
+def _audio_sources(scene):
+    if scene.audio_id:
+        return [scene.audio.fichier.path]
+    lines = list(scene.dialogues.select_related('audio').order_by('ordre'))
+    if lines and all(line.audio_id for line in lines):
+        return [line.audio.fichier.path for line in lines]
+    raise RenderError('MISSING_AUDIO')
+
+
+def _normalized_audio(paths, tmp):
+    """Concatène en PCM après rééchantillonnage, même si les codecs diffèrent."""
+    path = Path(tmp) / 'normalized.wav'
+    cmd = ['ffmpeg', '-nostdin', '-hide_banner', '-loglevel', 'error', '-y']
+    for src in paths:
+        duration_sec(src, 'audio')
+        cmd += ['-i', str(src)]
+    if len(paths) == 1:
+        filter_graph = '[0:a:0]aresample=48000,aformat=sample_fmts=s16:channel_layouts=stereo[a]'
+    else:
+        filters = []
+        for idx in range(len(paths)):
+            filters.append(f'[{idx}:a:0]aresample=48000,aformat=sample_fmts=s16:channel_layouts=stereo[a{idx}]')
+        filters.append(''.join(f'[a{idx}]' for idx in range(len(paths))) + f'concat=n={len(paths)}:v=0:a=1[a]')
+        filter_graph = ';'.join(filters)
+    _run(cmd + ['-filter_complex', filter_graph, '-map', '[a]', '-c:a', 'pcm_s16le', str(path)])
+    return path, duration_sec(path, 'audio')
+
+
+def _sync_plan(scene, source_seconds, video_seconds):
+    """Calcule le segment choisi et sa vitesse. Refuse les écarts, aucune troncature silencieuse."""
+    from ..models import SceneMedia
+    mode = scene.sync_mode or SceneMedia.SyncMode.SPEED
+    start = (scene.audio_trim_start_ms or 0) / 1000.0
+    end = (scene.audio_trim_end_ms / 1000.0) if scene.audio_trim_end_ms is not None else source_seconds
+    if mode == SceneMedia.SyncMode.SPEED:
+        start, end = 0.0, source_seconds
+    if start < 0 or end <= start or end > source_seconds + 0.025:
+        raise RenderError('INVALID_AUDIO_SEGMENT')
+    end = min(end, source_seconds)
+    selected = end - start
+    if mode == SceneMedia.SyncMode.TRIM:
+        if abs(selected - video_seconds) > 0.020:
+            raise RenderError('TRIM_LENGTH_MUST_MATCH_VIDEO')
+        rate = 1.0
+    elif mode in {SceneMedia.SyncMode.SPEED, SceneMedia.SyncMode.TRIM_SPEED}:
+        rate = selected / video_seconds
+        if not 0.5 <= rate <= 2.5:
+            raise RenderError('AUDIO_SPEED_OUT_OF_RANGE')
+    else:
+        raise RenderError('UNKNOWN_SYNC_MODE')
+    return start, end, rate
+
+
+def _atempo_chain(speed):
+    # FFmpeg atempo est stable entre 0.5 et 2.0. Chaîner pour 2.0-2.5.
+    pieces = []
+    remaining = float(speed)
+    while remaining > 2.0:
+        pieces.append('atempo=2.0')
+        remaining /= 2.0
+    pieces.append(f'atempo={remaining:.9f}')
+    return ','.join(pieces)
+
+
+def _check_final(filepath, target, audio=True):
+    stream_data = probe(filepath)['streams']
+    vs = next((s for s in stream_data if s.get('codec_type') == 'video'), None)
+    au = next((s for s in stream_data if s.get('codec_type') == 'audio'), None)
+    if audio and not au:
+        raise RenderError('RENDER_AUDIO_MISSING')
+    if target > settings.STUDIO_MAX_MEDIA_SECONDS:
+        raise RenderError('RENDER_DURATION_LIMIT')
+    if vs:
+        video_len = float(vs.get('duration') or duration_sec(filepath, 'video'))
+        if abs(video_len - target) > 0.085:
+            raise RenderError('RENDER_DURATION_MISMATCH')
+        if audio and abs(float(au.get('duration') or target) - video_len) > 0.085:
+            raise RenderError('AUDIO_VIDEO_DURATION_MISMATCH')
+    elif audio and abs(duration_sec(filepath, 'audio') - target) > 0.09:
+        raise RenderError('RENDER_DURATION_MISMATCH')
+
+
+def _validate_result(output):
+    if not output.is_file() or not output.stat().st_size:
+        raise RenderError('RENDER_EMPTY')
+    if output.stat().st_size > settings.STUDIO_MAX_OUTPUT_BYTES:
+        raise RenderError('RENDER_TOO_LARGE')
+    return output.read_bytes()
+
+
+def render_audio_only(scene):
+    """Scène sans image/vidéo : narration MP3 autonome (TTS ou importée)."""
+    with tempfile.TemporaryDirectory(prefix='safidiko-audio-') as tmp:
+        src, duration = _normalized_audio(_audio_sources(scene), tmp)
+        if duration > settings.STUDIO_MAX_MEDIA_SECONDS:
+            raise RenderError('RENDER_DURATION_LIMIT')
+        output = Path(tmp) / 'result.mp3'
+        _run(['ffmpeg', '-nostdin', '-hide_banner', '-loglevel', 'error', '-y',
+              '-i', str(src), '-vn', '-codec:a', 'libmp3lame', '-b:a', '160k', str(output)])
+        _check_final(output, duration)
+        return _validate_result(output)
+
+
+def render_scene(scene):
+    """Produit une vidéo avec narration ayant la même durée que la vidéo source."""
     from ..models import SceneMedia
     mode = scene.mode
-    if mode == SceneMedia.Mode.TEXT_ONLY:
-        raise RenderError('TEXT_ONLY_NO_VIDEO')
-    if mode in (SceneMedia.Mode.VIDEO_ORIGINAL, SceneMedia.Mode.VIDEO_AUDIO) and not scene.video_id:
+    if mode in (SceneMedia.Mode.TEXT_ONLY, SceneMedia.Mode.AUDIO_ONLY):
+        raise RenderError('SCENE_HAS_NO_VIDEO_OUTPUT')
+    if mode in {SceneMedia.Mode.VIDEO_AUDIO, SceneMedia.Mode.VIDEO_ORIGINAL} and not scene.video_id:
         raise RenderError('MISSING_VIDEO')
-    lines = list(scene.dialogues.select_related('audio').order_by('ordre'))
-    if mode in (SceneMedia.Mode.VIDEO_AUDIO, SceneMedia.Mode.IMAGE_AUDIO):
-        if scene.audio_id:
-            audio_paths = [scene.audio.fichier.path]
-        elif lines and all(line.audio_id for line in lines):
-            audio_paths = [line.audio.fichier.path for line in lines]
-        else:
-            raise RenderError('MISSING_AUDIO')
-    else:
-        audio_paths = []
-
-    video_duration = None
-    if mode == SceneMedia.Mode.IMAGE_AUDIO:
-        if not scene.image_id:
-            raise RenderError('MISSING_IMAGE')
-    else:
-        video_duration = duration_sec(scene.video.fichier.path, 'video')
-
-    audio_duration = sum(duration_sec(path, 'audio') for path in audio_paths)
-    if mode == SceneMedia.Mode.VIDEO_ORIGINAL:
-        total = video_duration
-    elif mode == SceneMedia.Mode.IMAGE_AUDIO:
-        total = audio_duration + 0.15  # ne pas couper la dernière syllabe à la frame près
-    else:
-        total = max(video_duration, audio_duration + 0.15)
-
-    max_duration = settings.STUDIO_MAX_MEDIA_SECONDS
-    if total <= 0 or total > max_duration:
-        raise RenderError('RENDER_DURATION_LIMIT')
-    # Forcer une durée stable (arrondie au nombre de frames), marge de 1 frame.
-    total = math.ceil(total * 25) / 25
+    if mode == SceneMedia.Mode.IMAGE_AUDIO and not scene.image_id:
+        raise RenderError('MISSING_IMAGE')
 
     with tempfile.TemporaryDirectory(prefix='safidiko-render-') as tmp:
-        output = Path(tmp) / 'output.mp4'
         if mode == SceneMedia.Mode.IMAGE_AUDIO:
+            src, audio_duration = _normalized_audio(_audio_sources(scene), tmp)
+            target = math.ceil(audio_duration * 25) / 25
+            audio_plan = (0.0, audio_duration, 1.0)
             inputs = ['-loop', '1', '-framerate', '25', '-i', scene.image.fichier.path]
         else:
+            length = duration_sec(scene.video.fichier.path, 'video')
+            target = math.ceil(length * 25) / 25
             inputs = ['-i', scene.video.fichier.path]
-        for path in audio_paths:
-            inputs += ['-i', path]
-        filter_parts = []
-        standard_video = 'scale=w=1280:h=720:force_original_aspect_ratio=decrease,pad=1280:720:(ow-iw)/2:(oh-ih)/2,setsar=1,fps=25'
-        if mode == SceneMedia.Mode.VIDEO_AUDIO and video_duration < total:
-            freeze = total - video_duration
-            standard_video += f',tpad=stop_mode=clone:stop_duration={freeze:.3f}'
-        elif mode == SceneMedia.Mode.VIDEO_ORIGINAL:
-            # Certains conteneurs ont leur dernière frame à durée-1/fps. Ne pas la supprimer.
-            standard_video += ',tpad=stop_mode=clone:stop_duration=0.040'
-        filter_parts.append(f'[0:v:0]{standard_video},trim=duration={total:.3f},setpts=PTS-STARTPTS[vout]')
+            if mode == SceneMedia.Mode.VIDEO_AUDIO:
+                src, audio_duration = _normalized_audio(_audio_sources(scene), tmp)
+                audio_plan = _sync_plan(scene, audio_duration, target)
+        if target <= 0 or target > settings.STUDIO_MAX_MEDIA_SECONDS:
+            raise RenderError('RENDER_DURATION_LIMIT')
+        filters = []
+        frame = 'scale=w=1280:h=720:force_original_aspect_ratio=decrease,pad=1280:720:(ow-iw)/2:(oh-ih)/2,setsar=1,fps=25'
+        if mode != SceneMedia.Mode.IMAGE_AUDIO:
+            # Marginale extension de dernière frame pour les vidéos à durée non multiple de 40 ms.
+            frame += ',tpad=stop_mode=clone:stop_duration=0.120'
+        filters.append(f'[0:v:0]{frame},trim=duration={target:.6f},setpts=PTS-STARTPTS[vout]')
         mapping = ['-map', '[vout]']
         if mode == SceneMedia.Mode.VIDEO_ORIGINAL:
             mapping += ['-map', '0:a:0?']
         else:
-            if len(audio_paths) == 1:
-                prefix = '[1:a:0]'
-            else:
-                prefix = '[combined]'
-                filter_parts.append(''.join(f'[{i}:a:0]' for i in range(1, len(audio_paths)+1))
-                                    + f'concat=n={len(audio_paths)}:v=0:a=1{prefix}')
-            filter_parts.append(f'{prefix}aresample=48000,apad=whole_dur={total:.3f},atrim=duration={total:.3f},asetpts=PTS-STARTPTS[aout]')
+            inputs += ['-i', str(src)]
+            start, end, speed = audio_plan
+            audio_filter = (f'[1:a:0]atrim=start={start:.6f}:end={end:.6f},asetpts=PTS-STARTPTS,'
+                            f'{_atempo_chain(speed)},aresample=48000:async=1:first_pts=0,'
+                            f'apad=whole_dur={target:.6f},atrim=duration={target:.6f},'
+                            'asetpts=PTS-STARTPTS[aout]')
+            filters.append(audio_filter)
             mapping += ['-map', '[aout]']
-
-        command = [
-            'ffmpeg', '-nostdin', '-hide_banner', '-loglevel', 'error', '-y',
-            *inputs, '-filter_complex', ';'.join(filter_parts), *mapping,
-            '-t', f'{total:.3f}', '-c:v', 'libx264', '-pix_fmt', 'yuv420p',
-            '-preset', 'veryfast', '-crf', '26', '-c:a', 'aac', '-b:a', '128k',
-            '-movflags', '+faststart', str(output),
-        ]
-        try:
-            subprocess.run(command, check=True, capture_output=True, timeout=settings.STUDIO_RENDER_TIMEOUT)
-        except FileNotFoundError:
-            raise RenderError('FFMPEG_NOT_INSTALLED') from None
-        except subprocess.TimeoutExpired:
-            raise RenderError('RENDER_TIMEOUT') from None
-        except subprocess.CalledProcessError:
-            raise RenderError('RENDER_FAILED') from None
-        if not output.is_file() or not output.stat().st_size:
-            raise RenderError('RENDER_EMPTY')
-        if output.stat().st_size > settings.STUDIO_MAX_OUTPUT_BYTES:
-            raise RenderError('RENDER_TOO_LARGE')
-        # Contrôle réel : erreur >2 frames => ne pas publier un clip tronqué.
-        actual = duration_sec(output, 'video')
-        if abs(actual - total) > 0.12:
-            raise RenderError('RENDER_DURATION_MISMATCH')
-        return output.read_bytes()
+        output = Path(tmp) / 'result.mp4'
+        _run(['ffmpeg', '-nostdin', '-hide_banner', '-loglevel', 'error', '-y',
+              *inputs, '-filter_complex', ';'.join(filters), *mapping,
+              '-t', f'{target:.6f}', '-c:v', 'libx264', '-pix_fmt', 'yuv420p',
+              '-preset', 'veryfast', '-crf', '26', '-c:a', 'aac', '-b:a', '128k',
+              '-movflags', '+faststart', str(output)])
+        _check_final(output, target, audio=mode != SceneMedia.Mode.VIDEO_ORIGINAL)
+        return _validate_result(output)

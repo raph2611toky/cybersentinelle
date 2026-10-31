@@ -28,7 +28,7 @@ class VoiceProfileAdmin(admin.ModelAdmin):
 class SceneMediaAdmin(admin.ModelAdmin):
     list_display = ('noeud', 'langue', 'mode', 'statut')
     list_filter = ('mode', 'statut', 'langue')
-    readonly_fields = ('id', 'created_at', 'updated_at', 'statut', 'video_finale')
+    readonly_fields = ('id', 'created_at', 'updated_at', 'statut', 'video_finale', 'audio_finale')
 
 
 @admin.register(DialogueLine)

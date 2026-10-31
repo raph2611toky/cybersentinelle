@@ -32,8 +32,9 @@ class PublishedSceneMediaAPIView(APIView):
             canonical = '\n'.join(f"{e['path']}:{e['sha256']}" for e in sorted(entries, key=lambda e: e['path']))
             if manifest.get('version') != release.numero or sha(canonical.encode()) != release.digest_global:
                 return error(503, 'CONTENT_NOT_PUBLISHED', 'Publication invalide')
-            target = f'media/{asset_id}.mp4'
-            entry = next((e for e in entries if e.get('path') == target and e.get('type') == 'MEDIA'), None)
+            allowed = (f'media/{asset_id}.mp4', f'media/{asset_id}.mp3')
+            entry = next((e for e in entries if e.get('path') in allowed and e.get('type') == 'MEDIA'), None)
+            target = entry['path'] if entry else None
             if not entry:
                 return error(404, 'NOT_FOUND', 'Clip introuvable')
             fpath = (root / target).resolve()
@@ -45,8 +46,9 @@ class PublishedSceneMediaAPIView(APIView):
                     digest.update(chunk)
             if digest.hexdigest() != entry['sha256']:
                 return error(503, 'CONTENT_NOT_PUBLISHED', 'Média publié corrompu')
-            response = FileResponse(fpath.open('rb'), content_type='video/mp4')
-            response['Content-Disposition'] = f'inline; filename="clip-{asset_id}.mp4"'
+            mime = 'audio/mpeg' if target.endswith('.mp3') else 'video/mp4'
+            response = FileResponse(fpath.open('rb'), content_type=mime)
+            response['Content-Disposition'] = f'inline; filename="clip-{asset_id}.{target.rsplit('.', 1)[-1]}"'
             response['Cache-Control'] = 'public, max-age=86400, immutable'
             return response
         except Exception as exc:

@@ -80,8 +80,14 @@ def test_render_sync_works_when_audio_exceeds_video(tmp_path, settings):
     scene = SimpleNamespace(
         mode=SceneMedia.Mode.VIDEO_AUDIO, video_id=1, video=SimpleNamespace(fichier=SimpleNamespace(path=str(src))),
         image_id=None, audio_id=1, audio=SimpleNamespace(fichier=SimpleNamespace(path=str(voice))), dialogues=Lines(),
+        sync_mode=SceneMedia.SyncMode.SPEED, audio_trim_start_ms=0, audio_trim_end_ms=None,
     )
     payload = render_scene(scene)
     result = tmp_path / 'render.mp4'
     result.write_bytes(payload)
-    assert float(probe(str(result))['format']['duration']) >= 2.4
+    # Nouvelle règle : la narration doit être accélérée pour correspondre à la vidéo, sans étirer l'image.
+    info = probe(str(result))
+    video_len = float(next(s for s in info['streams'] if s['codec_type'] == 'video')['duration'])
+    audio_len = float(next(s for s in info['streams'] if s['codec_type'] == 'audio')['duration'])
+    assert abs(video_len - audio_len) <= 0.085
+    assert abs(audio_len - 1.0) <= 0.085

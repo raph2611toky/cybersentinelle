@@ -61,7 +61,7 @@ tts_doc = swagger_auto_schema(operation_summary='Mettre en file une génération
     'scene': openapi.Schema(type=openapi.TYPE_STRING, format='uuid'),
     'voix': openapi.Schema(type=openapi.TYPE_STRING, format='uuid'),
     'texte': openapi.Schema(type=openapi.TYPE_STRING)}), responses=responses(obj(JobSerializer), 202))
-render_doc = swagger_auto_schema(operation_summary='Mettre en file un assemblage vidéo FFmpeg', tags=['Studio / Scènes'],
+render_doc = swagger_auto_schema(operation_summary='Assembler en FFmpeg une vidéo synchronisée ou produire la narration audio seule', tags=['Studio / Scènes'],
   request_body=openapi.Schema(type=openapi.TYPE_OBJECT), responses=responses(obj(JobSerializer), 202))
 job_list_doc = swagger_auto_schema(operation_summary='Lister les travaux du studio', tags=['Studio / Tâches'], responses=responses(JobListResponseSerializer()))
 job_detail_doc = swagger_auto_schema(operation_summary='Consulter le résultat d’une tâche', tags=['Studio / Tâches'], responses=responses(obj(JobSerializer)))

@@ -30,18 +30,27 @@ class VoiceSerializer(ValidatedModelSerializer):
 
 class SceneSerializer(ValidatedModelSerializer):
     video_finale_url = serializers.SerializerMethodField()
+    audio_finale_url = serializers.SerializerMethodField()
 
     class Meta:
         model = SceneMedia
         fields = ('id', 'noeud', 'langue', 'mode', 'image', 'video', 'audio', 'sous_titres',
-                  'video_finale', 'video_finale_url', 'narration_texte', 'voix', 'statut', 'created_at', 'updated_at')
-        read_only_fields = ('id', 'video_finale', 'video_finale_url', 'statut', 'created_at', 'updated_at')
+                  'video_finale', 'video_finale_url', 'audio_finale', 'audio_finale_url',
+                  'sync_mode', 'audio_trim_start_ms', 'audio_trim_end_ms', 'narration_texte', 'voix', 'statut', 'created_at', 'updated_at')
+        read_only_fields = ('id', 'video_finale', 'video_finale_url', 'audio_finale', 'audio_finale_url', 'statut', 'created_at', 'updated_at')
 
     def get_video_finale_url(self, obj):
         request = self.context.get('request')
         if not obj.video_finale_id:
             return None
         path = reverse('studio-media-download', kwargs={'pk': obj.video_finale_id})
+        return request.build_absolute_uri(path) if request else path
+
+    def get_audio_finale_url(self, obj):
+        if not obj.audio_finale_id:
+            return None
+        request = self.context.get('request')
+        path = reverse('studio-media-download', kwargs={'pk': obj.audio_finale_id})
         return request.build_absolute_uri(path) if request else path
 
     def validate(self, attrs):
@@ -51,6 +60,15 @@ class SceneSerializer(ValidatedModelSerializer):
             raise serializers.ValidationError({'noeud': 'Les médias sont réservés aux scènes et aux fins.'})
         if self.instance is not None and 'noeud' in attrs and attrs['noeud'].pk != self.instance.noeud_id:
             raise serializers.ValidationError({'noeud': 'Le nœud ne peut pas être modifié : créez un autre montage.'})
+        # Interdire les associations invalides avant l'enregistrement.
+        mode = attrs.get('mode', getattr(self.instance, 'mode', SceneMedia.Mode.TEXT_ONLY))
+        if mode == SceneMedia.Mode.AUDIO_ONLY:
+            if attrs.get('video') or attrs.get('image'):
+                raise serializers.ValidationError({'mode': 'Audio seul : aucune image ou vidéo ne doit être associée.'})
+        start = attrs.get('audio_trim_start_ms', getattr(self.instance, 'audio_trim_start_ms', 0))
+        end = attrs.get('audio_trim_end_ms', getattr(self.instance, 'audio_trim_end_ms', None))
+        if end is not None and end <= start:
+            raise serializers.ValidationError({'audio_trim_end_ms': 'La fin doit être après le début.'})
         attrs['statut'] = SceneMedia.Status.DRAFT
         return super().validate(attrs)
 

@@ -117,6 +117,16 @@ def decorate_story_urls(data, manifest, request):
     # Ne jamais exposer un chemin privé dans une réponse publique.
     for node in data.get("nodes", {}).values():
         for lang_data in node.get("media", {}).values():
+            audio_target = lang_data.pop('audio_path', None)
+            if audio_target and audio_target.startswith('media/') and audio_target.endswith('.mp3'):
+                from uuid import UUID
+                try:
+                    audio_id = UUID(audio_target.split('/')[-1].removesuffix('.mp3'))
+                except ValueError:
+                    continue
+                lang_data['audio_url'] = request.build_absolute_uri(reverse('story-media', kwargs={
+                    'version': manifest['version'], 'asset_id': audio_id,
+                }))
             target = lang_data.pop("video_path", None)
             if target and target.startswith('media/') and target.endswith('.mp4'):
                 asset_id = target.split('/')[-1].removesuffix('.mp4')
@@ -214,11 +224,20 @@ def publication_payload():
         # Les fichiers ne sont rendus publics qu'après publication d'une copie figée.
         from apps.media_studio.models import SceneMedia, MediaAsset
         scene_media = SceneMedia.objects.filter(noeud__tantara=story).select_related(
-            'noeud', 'langue', 'video_finale', 'video', 'audio'
+            'noeud', 'langue', 'video_finale', 'audio_finale', 'video', 'audio'
         )
         for scene in scene_media:
             if scene.mode == SceneMedia.Mode.TEXT_ONLY:
                 info = {'mode': 'text'}
+            elif scene.mode == SceneMedia.Mode.AUDIO_ONLY:
+                if scene.statut != SceneMedia.Status.READY or not scene.audio_finale_id:
+                    raise ValidationError(f'{story.slug}:{scene.noeud.cle}/{scene.langue.code}: rendu audio absent')
+                asset = scene.audio_finale
+                if asset.type != MediaAsset.Kind.AUDIO or not asset.droits_confirmes:
+                    raise ValidationError(f'{story.slug}:{scene.noeud.cle}: audio non validé')
+                if not asset.fichier or not asset.fichier.storage.exists(asset.fichier.name):
+                    raise ValidationError(f'{story.slug}:{scene.noeud.cle}: voix introuvable')
+                info = {'mode': 'audio', 'audio_path': f'media/{asset.pk}.mp3'}
             else:
                 if scene.statut != SceneMedia.Status.READY or not scene.video_finale_id:
                     raise ValidationError(f'{story.slug}:{scene.noeud.cle}/{scene.langue.code}: rendu vidéo absent')
@@ -296,7 +315,7 @@ def _studio_media_in_payload(payload):
             continue
         for node in story.get('nodes', {}).values():
             for lang_data in node.get('media', {}).values():
-                for key, prefix in (('video_path', 'media/'), ('subtitle_path', 'subtitles/')):
+                for key, prefix in (('video_path', 'media/'), ('audio_path', 'media/'), ('subtitle_path', 'subtitles/')):
                     target = lang_data.get(key)
                     if not target:
                         continue
