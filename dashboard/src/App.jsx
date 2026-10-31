@@ -4,6 +4,7 @@ import Login from './pages/Login';
 import Overview from './pages/Overview';
 import Tantara from './pages/Tantara';
 import StoryTree from './pages/StoryTree';
+import StoryPreview from './pages/StoryPreview';
 import Media from './pages/Media';
 import Voice from './pages/Voice';
 import Resources from './pages/Resources';
@@ -26,6 +27,7 @@ export default function App() {
       <Route path="dashboard" element={<Overview />} />
       <Route path="tantara" element={<Tantara />} />
       <Route path="arbre" element={<StoryTree />} />
+      <Route path="previsualisation" element={<StoryPreview />} />
       <Route path="medias" element={<Media />} />
       <Route path="voix" element={<Voice />} />
       <Route path="ressources" element={<Resources />} />

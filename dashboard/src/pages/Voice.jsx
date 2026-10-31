@@ -7,7 +7,7 @@ import { studioApi } from '../services/editor';
 import { apiError } from '../services/api';
 
 export default function Voice() {
-  const { voices, scenes, jobs, languages, nodes, media, perform, refresh, busy } = useAdmin();
+  const { voices, scenes, jobs, languages, nodes, stories, media, perform, refresh, busy } = useAdmin();
   const [lang,setLang] = useState('fr');
   const [text,setText] = useState('Tu peux demander de l’aide à une personne de confiance.');
   const [playing,setPlaying] = useState(false);
@@ -38,6 +38,10 @@ export default function Voice() {
   const formattedDuration = value => (value / 1000).toFixed(2).replace('.', ',') + ' s';
   const supported = typeof window !== 'undefined' && 'speechSynthesis' in window;
   const availableNodes = useMemo(() => nodes.filter(n => ['SCENE','ENDING'].includes(n.type)),[nodes]);
+  const uniqueMediaNodes = useMemo(() => new Set(scenes.map(s => String(s.noeud))).size, [scenes]);
+  const storyNodes = useMemo(() => stories.map(story => ({ story, items: nodes.filter(n => String(n.tantara) === String(story.id)) })).filter(g => g.items.length), [stories, nodes]);
+  const nodeScene = (nodeId, code) => { const id = languages.find(l => l.code === code)?.id; return scenes.find(s => String(s.noeud) === String(nodeId) && String(s.langue) === String(id)); };
+  const openNodeForLanguage = (node, code) => { const l = languages.find(item => item.code === code); if (!l) return; setError(''); setAudioUpload({file:null,title:'',licence:'',rights:false}); setSceneForm({...blankScene(), noeud:node.id, langue:l.id}); setDialog('scene'); };
   const chosenScene = scenes.find(s => s.id === synth.scene);
   const voiceLanguage = languages.find(l=>l.id===voiceForm.langue)?.code;
   const selectedLang = languages.find(l => l.code === synth.langue);
@@ -130,7 +134,7 @@ export default function Voice() {
   return <div className="page-stack">
     <div className="stats-grid compact-stats">
       <StatCard label="Voix configurées" value={voices.length} note="Google Cloud / ElevenLabs / Gemini" icon={Mic2} tone="purple"/>
-      <StatCard label="Nœuds avec médias" value={scenes.length} note="Scènes et fins" icon={AudioLines} tone="blue"/>
+      <StatCard label="Nœuds distincts" value={uniqueMediaNodes} note={`${scenes.length} variantes FR/MG`} icon={AudioLines} tone="blue"/>
       <StatCard label="Jobs terminés" value={jobs.filter(j=>j.statut==='SUCCESS').length} note="TTS / Rendu" icon={FileAudio} tone="purple"/>
       <StatCard label="En attente" value={jobs.filter(j=>['PENDING','RUNNING'].includes(j.statut)).length} note="Tâches asynchrones" icon={WandSparkles} tone="blue"/>
     </div>
@@ -166,6 +170,17 @@ export default function Voice() {
         <div className="soft-note">Lorsque la scène possède déjà une image ou vidéo, le TTS déclenche automatiquement l'assemblage après réussite. Si aucun visuel n'est associé, la narration est conservée comme audio seul. Google Cloud possède un quota gratuit limité et peut facturer les dépassements.</div>
       </form></Panel>
     </div>
+    <Panel title="Toutes les scènes du Tantara" icon={AudioLines}><div className="form-stack">
+      {storyNodes.map(group => <div key={group.story.id} className="story-node-group">
+        <div className="story-node-heading"><strong>{group.story.title}</strong><Link className="btn btn-outline" to={`/previsualisation?story=${encodeURIComponent(group.story.id)}`}><Play size={14}/> Lire le parcours complet</Link></div>
+        {group.items.map(n => <div className="story-node-row" key={n.id}>
+          <div><strong>{n.titre_fr}</strong><small>{n.type === 'DECISION' ? 'DÉCISION : choix du joueur, sans vidéo' : n.type === 'ENDING' ? 'FIN' : 'SCÈNE'}</small></div>
+          {n.type !== 'DECISION' && ['fr','mg'].map(code => {const sc=nodeScene(n.id,code); return <div className="story-node-language" key={code}><span>{code.toUpperCase()} : {sc?.statut || 'Non configuré'}</span><button className="btn btn-outline" disabled={busy} onClick={() => sc ? editScene(sc) : openNodeForLanguage(n, code)}>{sc ? 'Modifier' : 'Associer'}</button></div>})}
+        </div>)}
+      </div>)}
+      {!storyNodes.length && <div className="empty-state">Aucun nœud Django appliqué. Reviens dans « Arbres narratifs », enregistre puis applique le graphe.</div>}
+      <span className="muted">Un nœud narratif peut avoir deux montages distincts (FR et MG). « DRAFT » signifie que le média n'est pas encore finalisé ; « READY » indique un rendu prêt. Les décisions ne nécessitent pas de média.</span>
+    </div></Panel>
     <Panel title="Scènes et rendus" icon={AudioLines}><div className="resource-list">
       {scenes.map(s=><div className="resource-list-row" key={s.id}><span className="resource-list-icon"><AudioLines size={18}/></span><span className="resource-list-main"><strong>{nodes.find(n=>n.id===s.noeud)?.titre_fr||s.noeud}</strong><small>{s.mode} · {languages.find(l=>l.id===s.langue)?.code||s.langue} · {s.statut}</small></span><div className="table-actions"><button className="btn btn-outline" disabled={busy} onClick={()=>editScene(s)}>Modifier</button>
       <button disabled={s.mode==='TEXT_ONLY'||busy} className="btn btn-outline" onClick={()=>render(s.id)}>{s.mode==='AUDIO_ONLY'?'Finaliser la voix':'Assembler'}</button>

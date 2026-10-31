@@ -18,6 +18,7 @@ const titles = {
   '/dashboard': ['Vue d’ensemble', 'Gérez vos histoires, vos médias et les publications.'],
   '/tantara': ['Tantara', 'Création et gestion des récits interactifs.'],
   '/arbre': ['Arbres narratifs', 'Concevez les scènes et leurs embranchements.'],
+  '/previsualisation': ['Prévisualisation du Tantara', 'Parcourez les scènes et leurs décisions comme un joueur.'],
   '/medias': ['Médiathèque', 'Images, vidéos et fichiers audio.'],
   '/voix': ['Studio vocal', 'Lecture, narration et assemblage sonore.'],
   '/ressources': ['Ressources d’aide', 'Conseils pédagogiques et orientations vérifiées.'],

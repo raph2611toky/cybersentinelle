@@ -15,7 +15,7 @@ function slug(s){return s.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f
 function nextNumber(stories){const nums=new Set(stories.map(s=>s.numero));for(let i=1;i<=99;i++){const n=String(i).padStart(2,'0');if(!nums.has(n))return n;}return ''}
 
 export default function Tantara(){
-  const {stories,addStory,updateStory,removeStory,perform,busy}=useAdmin();
+  const {stories,releases,addStory,updateStory,removeStory,perform,busy}=useAdmin();
   const navigate=useNavigate();const [params]=useSearchParams();
   const [search,setSearch]=useState(params.get('q')||'');
   const [status,setStatus]=useState('all');
@@ -47,7 +47,9 @@ export default function Tantara(){
 
   const [actionError,setActionError]=useState('');
   useEffect(()=>setSearch(params.get('q')||''),[params]);
-  const filtered=useMemo(()=>stories.filter(s=>(status==='all'||s.status===status) && `${s.title} ${s.titleMg} ${s.theme}`.toLowerCase().includes(search.toLowerCase())),[stories,search,status]);
+  const publishedSlugs=useMemo(() => new Set((releases.find(r => r.statut === 'ACTIVE')?.fichiers || []).filter(f => f.type === 'STORY').map(f => f.chemin?.match(/^stories\/([a-z0-9-]+)\.json$/)?.[1]).filter(Boolean)), [releases]);
+  const effectiveStatus=s=>publishedSlugs.has(s.slug)?'published':(s.status==='published'?'ready':s.status);
+  const filtered=useMemo(()=>stories.filter(s=>(status==='all'||effectiveStatus(s)===status) && `${s.title} ${s.titleMg} ${s.theme}`.toLowerCase().includes(search.toLowerCase())),[stories,search,status,publishedSlugs]);
   const create=()=>{setActionError('');setCoverFile(null);setRemoveCover(false);setMinutes(5);setForm({...empty,numero:nextNumber(stories)});setModal({mode:'create'})};
   const edit=s=>{setActionError('');setCoverFile(null);setRemoveCover(false);setMinutes(toMinutes(s.duree));setForm(Object.fromEntries(Object.keys(empty).map(k=>[k,s[k] ?? empty[k]])));setModal({mode:'edit',id:s.id,coverUrl:s.coverUrl||null})};
   const save=async e=>{
@@ -65,15 +67,15 @@ export default function Tantara(){
     <div className="section-toolbar"><span className="section-hint">Saisie française · Traduction malgache automatique en file</span><button className="btn btn-primary" onClick={create}><Plus size={17}/> Nouveau Tantara</button></div>
     <div className="stats-grid compact-stats">
       <StatCard icon={BookOpen} label="Total" value={stories.length} note="Histoires" tone="purple"/>
-      <StatCard icon={Eye} label="Publiés" value={stories.filter(s=>s.status==='published').length} note="Référencés" tone="blue"/>
-      <StatCard icon={Pencil} label="Brouillons" value={stories.filter(s=>s.status==='draft').length} note="À compléter" tone="purple"/>
-      <StatCard icon={GitBranch} label="À relire" value={stories.filter(s=>s.status==='review').length} note="Contrôles" tone="blue"/>
+      <StatCard icon={Eye} label="Publiés" value={stories.filter(s=>publishedSlugs.has(s.slug)).length} note="Référencés" tone="blue"/>
+      <StatCard icon={Pencil} label="Brouillons" value={stories.filter(s=>effectiveStatus(s)==='draft').length} note="À compléter" tone="purple"/>
+      <StatCard icon={GitBranch} label="À relire" value={stories.filter(s=>effectiveStatus(s)==='review').length} note="Contrôles" tone="blue"/>
     </div>
     <Panel title="Histoires" icon={BookOpen} action={<span className="muted">{filtered.length} résultat(s)</span>}>
       <div className="table-toolbar"><label className="search-control"><Search size={16}/><input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Chercher un Tantara…"/></label>
         <div className="filter-tabs">{[['all','Tous'],['published','Publiés'],['draft','Brouillons'],['review','À relire']].map(([v,t])=><button key={v} className={`filter-tab ${status===v?'selected':''}`} onClick={()=>setStatus(v)}>{t}</button>)}</div></div>
       {filtered.length?<div className="data-table-wrap"><table className="data-table"><thead><tr><th>Tantara</th><th>Thème</th><th>Révision</th><th>Traduction</th><th>Statut</th><th>Actions</th></tr></thead><tbody>
-        {filtered.map(s=><tr key={s.id}><td><div className="story-table-identity">{s.coverUrl?<img className="story-cover-thumb" src={s.coverUrl} alt="" loading="lazy"/>:<span className="story-cover-thumb story-cover-placeholder"><BookOpen size={20}/></span>}<span><strong>{s.title}</strong><small>{s.titre_mg || s.slug}</small></span></div></td><td>{s.theme}</td><td>{s.revision || '1.0'}</td><td><span className={`translation-status translation-${s.translation_state?.state||'NONE'}`}>{({PENDING:'En file',FAILED:'Erreur',REVIEW_REQUIRED:'À relire',NONE:'—'})[s.translation_state?.state||'NONE']}</span></td><td><Status value={s.status}/></td><td><div className="table-actions">{s.translation_state?.state==='FAILED'&&<button title="Relancer la traduction MG" onClick={async()=>{try{await perform(()=>translationApi.retry('content_api.Tantara',s.id))}catch(e){alert(e.message)}}}><RefreshCw size={16}/></button>}<button title="Éditer les détails" onClick={()=>edit(s)}><Pencil size={16}/></button><button title="Éditer l’arbre" onClick={()=>navigate(`/arbre?story=${encodeURIComponent(s.id)}`)}><GitBranch size={16}/></button><button title="Supprimer" onClick={()=>del(s)}><Trash2 size={16}/></button></div></td></tr>)}
+        {filtered.map(s=><tr key={s.id}><td><div className="story-table-identity">{s.coverUrl?<img className="story-cover-thumb" src={s.coverUrl} alt="" loading="lazy"/>:<span className="story-cover-thumb story-cover-placeholder"><BookOpen size={20}/></span>}<span><strong>{s.title}</strong><small>{s.titre_mg || s.slug}</small></span></div></td><td>{s.theme}</td><td>{s.revision || '1.0'}</td><td><span className={`translation-status translation-${s.translation_state?.state||'NONE'}`}>{({PENDING:'En file',FAILED:'Erreur',REVIEW_REQUIRED:'À relire',NONE:'—'})[s.translation_state?.state||'NONE']}</span></td><td><Status value={effectiveStatus(s)}/></td><td><div className="table-actions">{s.translation_state?.state==='FAILED'&&<button title="Relancer la traduction MG" onClick={async()=>{try{await perform(()=>translationApi.retry('content_api.Tantara',s.id))}catch(e){alert(e.message)}}}><RefreshCw size={16}/></button>}<button className="preview-open-btn" title="Prévisualiser le parcours complet" onClick={()=>navigate(`/previsualisation?story=${encodeURIComponent(s.id)}`)}><Eye size={16}/> Aperçu</button><button title="Éditer les détails" onClick={()=>edit(s)}><Pencil size={16}/></button><button title="Éditer l’arbre" onClick={()=>navigate(`/arbre?story=${encodeURIComponent(s.id)}`)}><GitBranch size={16}/></button><button title="Supprimer" onClick={()=>del(s)}><Trash2 size={16}/></button></div></td></tr>)}
       </tbody></table></div>:<EmptyState title="Aucune histoire" description="Ajoutez un Tantara ou modifiez les filtres."/>}
       <div className="table-footer">Contenus enregistrés sur Django · aucune progression de joueur collectée</div>
     </Panel>
