@@ -13,16 +13,43 @@ export default function ScenePlayback({ video = '', audio = '', image = '', embe
   const videoRef = useRef(null);
   const audioRef = useRef(null);
   const completed = useRef({ video: false, audio: false, notified: false });
+  const sourceHistory = useRef(null);
   const [problem, setProblem] = useState('');
   const [videoFinished, setVideoFinished] = useState(false);
   const [playing, setPlaying] = useState(false);
   const paired = !!(video && audio && !embeddedAudio);
   const audioTrack = paired || (!video && !!audio);
 
+  // Conserver la position vidéo lorsqu'on passe de la narration FR à MG.
+  // Les changements de scène (nouvelle clé React) repartent normalement de zéro.
+  useEffect(() => () => {videoRef.current?.pause();audioRef.current?.pause();}, []);
   useEffect(() => {
+    const previous = sourceHistory.current;
+    const switchTrack = previous && previous.video === video && previous.audio !== audio;
+    const videoElement = videoRef.current;
+    const audioElement = audioRef.current;
+    const position = videoElement?.currentTime || 0;
+    const wasPlaying = Boolean(videoElement && !videoElement.paused && !videoElement.ended);
+    sourceHistory.current = {video,audio};
     completed.current = { video: !video, audio: !audioTrack, notified: false };
-    setProblem(''); setPlaying(false); setVideoFinished(false);
-    return () => { videoRef.current?.pause(); audioRef.current?.pause(); };
+    setProblem('');
+    if (!switchTrack) { setPlaying(false); setVideoFinished(false); }
+    if (!switchTrack || !audioElement || !audio) return undefined;
+
+    let active = true;
+    const resumeAudio = () => {
+      if (!active) return;
+      try {
+        audioElement.currentTime = Number.isFinite(audioElement.duration)
+          ? Math.min(position, Math.max(0, audioElement.duration - 0.02)) : position;
+      } catch { /* L'audio sera repositionné à la lecture si les métadonnées tardent. */ }
+      if (wasPlaying && !audioElement.ended) {
+        audioElement.play().catch(() => setProblem('Nouvelle piste sélectionnée : clique sur « Lire avec le son » pour autoriser la narration.'));
+      }
+    };
+    audioElement.addEventListener('loadedmetadata', resumeAudio, {once:true});
+    if (audioElement.readyState >= 1) resumeAudio();
+    return () => {active = false;audioElement.removeEventListener('loadedmetadata', resumeAudio);};
   }, [video, audio, audioTrack]);
 
   const completedPart = (part) => {

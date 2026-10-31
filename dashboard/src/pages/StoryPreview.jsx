@@ -5,18 +5,7 @@ import { useAdmin } from '../lib/store';
 import { storyApi } from '../services/editor';
 import api, { apiError } from '../services/api';
 import ScenePlayback from '../components/ScenePlayback';
-
-/** A media asset's public/staff endpoint may be emitted with an internal container hostname.
- *  Only accept known same-origin URL paths; never navigate to arbitrary storage hosts. */
-function safeMediaUrl(raw) {
-  if (!raw || typeof raw !== 'string') return '';
-  try {
-    const url = new URL(raw, window.location.origin);
-    if (!['http:', 'https:'].includes(url.protocol)) return '';
-    if (!/^\/api\/(editor\/studio\/media\/|v1\/)/.test(url.pathname)) return '';
-    return url.pathname + url.search;
-  } catch { return ''; }
-}
+import { adminMediaUrl, draftSceneSources, publishedSceneSources } from '../lib/sceneAudio';
 
 function toStoryGraph(saved) {
   const nodes = saved?.graph?.nodes || [];
@@ -79,45 +68,29 @@ export default function StoryPreview() {
 
 
   const node = graph?.nodes[current];
-  const language = languages.find(l => l.code === lang);
   const dbId = graph?.ids[current];
-  const draftScene = mode === 'draft' && dbId && language
-    ? scenes.find(s => s.noeud === dbId && s.langue === language.id)
-    : null;
   const draftAsset = mode === 'draft' && node?.media?.asset
     ? media.find(m => String(m.id) === String(node.media.asset))
     : null;
-  const publishedMedia = mode === 'published' ? node?.media?.[lang] : null;
-  const isReady = Boolean(draftScene?.statut === 'READY');
-  const mediaById = id => media.find(m => String(m.id) === String(id));
-  let video = '', audio = '', image = '', mediaNote = '', embeddedAudio = false;
-  if (mode === 'published') {
-    video = safeMediaUrl(publishedMedia?.video_url);
-    audio = safeMediaUrl(publishedMedia?.audio_url);
-    embeddedAudio = Boolean(publishedMedia?.audio_embedded && video);
-    image = safeMediaUrl(node?.visual_url);
-    if (!video && !audio && !image && node?.kind !== 'decision') mediaNote = `Aucun média publié en ${lang.toUpperCase()} pour ce nœud.`;
-  } else if (draftScene) {
-    const finalVideo = isReady ? safeMediaUrl(draftScene.video_finale_url) : '';
-    const finalAudio = isReady ? safeMediaUrl(draftScene.audio_finale_url) : '';
-    const sourceVideo = safeMediaUrl(draftScene.video_source_url || mediaById(draftScene.video)?.fichier_url);
-    const sourceAudio = safeMediaUrl(draftScene.audio_source_url || mediaById(draftScene.audio)?.fichier_url);
-    video = finalVideo || sourceVideo;
-    // Un MP4 final assemblé contient DÉJÀ la voix (ne pas la lire deux fois).
-    embeddedAudio = Boolean(finalVideo && draftScene.audio_embedded);
-    audio = finalVideo ? (embeddedAudio ? '' : finalAudio) : (finalAudio || sourceAudio);
-    image = safeMediaUrl(draftScene.image_source_url || mediaById(draftScene.image)?.fichier_url);
-    mediaNote = finalVideo && embeddedAudio
-      ? 'Vidéo finale : narration française/malgache intégrée au MP4.'
-      : isReady ? 'Rendu audio ou vidéo final prêt.'
-      : (video && audio ? 'Aperçu synchronisé : vidéo et voix séparées. La dernière image reste visible jusqu’à la fin de la narration.'
-      : 'Brouillon : rendu final à préparer pour la publication.');
-  } else if (draftAsset && lang === 'fr') {
-    if (draftAsset.type === 'VIDEO') video = safeMediaUrl(draftAsset.fichier_url);
-    if (draftAsset.type === 'IMAGE') image = safeMediaUrl(draftAsset.fichier_url);
-    mediaNote = 'Média du brouillon : applique l’arbre puis lance un rendu pour associer la voix.';
-  } else if (node && node.kind !== 'decision') {
-    mediaNote = `Pas de média associé à ce nœud en ${lang.toUpperCase()}.`;
+  const sources = mode === 'published'
+    ? publishedSceneSources(node, lang)
+    : dbId ? draftSceneSources({scenes, languages, media, nodeId:dbId, lang})
+    : { video:'', audio:'', image:'', embeddedAudio:false, audioLanguage:null };
+  let {video, audio, image, embeddedAudio} = sources;
+  let mediaNote = '';
+  if (mode === 'draft' && !video && !image && draftAsset) {
+    if (draftAsset.type === 'VIDEO') video = adminMediaUrl(draftAsset.fichier_url);
+    if (draftAsset.type === 'IMAGE') image = adminMediaUrl(draftAsset.fichier_url);
+    mediaNote = 'Média du brouillon : applique l’arbre puis prépare la narration pour le synchroniser.';
+  }
+  if (node?.kind !== 'decision') {
+    if (!video && !audio && !image) mediaNote = `Aucun média disponible en ${lang.toUpperCase()} pour ce nœud.`;
+    else if (sources.audioLanguage && sources.audioLanguage !== lang) mediaNote = `Piste ${lang.toUpperCase()} absente : la narration française est utilisée.`;
+    else if (audio) mediaNote = video
+      ? `Vidéo et piste ${sources.audioLanguage?.toUpperCase() || lang.toUpperCase()} synchronisées · une seule narration audible.`
+      : `Narration ${sources.audioLanguage?.toUpperCase() || lang.toUpperCase()} disponible pour cette scène.`;
+    else if (embeddedAudio) mediaNote = 'La narration est intégrée au montage vidéo final.';
+    else mediaNote = 'Média sans voix disponible : associe la narration FR dans le Studio vocal.';
   }
   const goTo = id => {if (!id || !graph?.nodes[id]) {setError('Destination de scène introuvable dans cet arbre.');return;}
     setVisited(p => [...p, current]); setCurrent(id); setFeedback(null);};
@@ -146,7 +119,7 @@ export default function StoryPreview() {
     {!loading && graph && node && <div className="story-preview-layout">
       <section className="story-preview-stage" aria-label="Lecture du Tantara">
         <div className="story-preview-stage-head"><span>{node.kind === 'decision' ? 'DÉCISION' : node.kind === 'ending' ? 'FIN' : 'SCÈNE'}</span><span>{lang.toUpperCase()}</span></div>
-        {node.kind !== 'decision' && <div className="story-preview-screen" key={`${current}-${lang}-${video}-${audio}`}>
+        {node.kind !== 'decision' && <div className="story-preview-screen" key={current}>
           <ScenePlayback video={video} audio={audio} image={image} embeddedAudio={embeddedAudio}
             title={currentTitle} onFinished={node.kind === 'scene' ? continueScene : undefined} />
         </div>}

@@ -36,9 +36,9 @@ export function Field({ label, children, required = false }) {
   return <label className="field"><span className="field-label">{label}{(required || inferred) && <span className="required-asterisk" aria-label="obligatoire"> *</span>}</span>{children}</label>;
 }
 
-export function Dialog({ title, onClose, children }) {
+export function Dialog({ title, onClose, children, className = '' }) {
   return <div className="dialog-backdrop" onMouseDown={e => { if(e.target === e.currentTarget) onClose(); }}>
-    <section className="dialog" role="dialog" aria-modal="true" aria-label={title}>
+    <section className={`dialog ${className}`} role="dialog" aria-modal="true" aria-label={title}>
       <div className="dialog-title"><h2>{title}</h2><button className="icon-button" onClick={onClose} aria-label="Fermer">×</button></div>
       {children}
     </section>

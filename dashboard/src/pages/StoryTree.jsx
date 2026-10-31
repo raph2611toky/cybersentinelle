@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import {
   Background, BackgroundVariant, Controls, Handle, Position, ReactFlow,
@@ -9,6 +9,8 @@ import {
   Plus, RefreshCw, Save, Trash2, Unplug, Video, Play,
 } from 'lucide-react';
 import { Field, Panel } from '../components/UI';
+import ScenePlayback from '../components/ScenePlayback';
+import { draftSceneSources } from '../lib/sceneAudio';
 import { useAdmin } from '../lib/store';
 import { storyApi, studioApi, translationApi } from '../services/editor';
 import { newGraph } from '../data/seed';
@@ -18,26 +20,67 @@ const branchColors = ['#38bdf8','#fbbf24','#c084fc'];
 const nodeTypes = { story: StoryNode };
 
 function StoryNode({ data, selected }) {
-  const routingRef=useRef(null);
-  const [wireLayout,setWireLayout]=useState({width:1,height:1,rows:[]});
-  useEffect(()=>{
-    const element=routingRef.current;if(!element)return;
-    const measure=()=>setWireLayout({width:element.offsetWidth,height:element.offsetHeight,
-      rows:Array.from(element.querySelectorAll('.flow-option')).map(row=>row.offsetTop+row.offsetHeight/2)});
-    measure();const observer=new ResizeObserver(measure);observer.observe(element);return()=>observer.disconnect();
-  },[data.options]);
+  const nodeRef = useRef(null);
+  const [wireLayout, setWireLayout] = useState({ width: 206, height: 140, rows: [] });
+  const options = data.options || [];
+
+  // Le SVG est ABSOLU, donc ne participe jamais au calcul de la hauteur du nœud.
+  // Observer seulement le conteneur permet de suivre la taille réelle des options
+  // sans boucle de redimensionnement causée par le dessin des fils.
+  useLayoutEffect(() => {
+    if (data.kind !== 'decision' || !nodeRef.current) return undefined;
+    const node = nodeRef.current;
+    const measure = () => {
+      const bounds = node.getBoundingClientRect();
+      // getBoundingClientRect tient compte du zoom React Flow ; les dimensions
+      // de SVG sont intrinsèques et doivent être calculées sans ce facteur.
+      const scale = bounds.width ? node.offsetWidth / bounds.width : 1;
+      const rows = [...node.querySelectorAll('.flow-option')].map(el => {
+        const rect = el.getBoundingClientRect();
+        return { x: Math.round((rect.right - bounds.left) * scale - 2), y: Math.round((rect.top - bounds.top + rect.height / 2) * scale) };
+      });
+      const width = Math.max(1, node.offsetWidth);
+      const height = Math.max(1, node.offsetHeight);
+      setWireLayout(previous => previous.width === width && previous.height === height &&
+        JSON.stringify(previous.rows) === JSON.stringify(rows) ? previous : { width, height, rows });
+    };
+    measure();
+    const observer = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(measure) : null;
+    observer?.observe(node);
+    window.addEventListener('resize', measure);
+    return () => { observer?.disconnect(); window.removeEventListener('resize', measure); };
+  }, [data.kind, data.options]);
+
   const icon = data.kind === 'decision' ? <GitBranch size={17}/> : data.kind === 'ending' ? <Flag size={17}/> : <BookOpen size={17}/>;
-  return <div className={`flow-node flow-${data.kind} ${selected ? 'flow-selected' : ''}`}>
+  return <div ref={nodeRef} className={`flow-node flow-${data.kind} ${selected ? 'flow-selected' : ''}`}>
     <Handle type="target" position={Position.Top} id="in" />
     <div className="flow-node-header">{icon}<span>{data.kind === 'decision' ? 'DÉCISION' : data.kind === 'ending' ? 'FIN' : 'SCÈNE'}</span>{(data.hasVideo || data.media?.asset) && <span className="flow-video-tag"><Video size={11}/> MÉDIA</span>}</div>
     <strong>{data.title?.fr || 'Sans titre'}</strong>
     <small>{data.text?.fr || 'Cliquer pour modifier'}</small>
-    {data.kind === 'decision'
-      ? <div className="decision-routing" ref={routingRef}>{(data.options || []).map((option, index) => <div key={option.id} className="flow-option" style={{borderLeft:`3px solid ${branchColors[index]}`}}><span style={{color:branchColors[index]}}>{index+1} · </span>{option.label?.fr || 'Choix'}</div>)}
-        <svg className="decision-wires" viewBox={`0 0 ${wireLayout.width} ${wireLayout.height}`} preserveAspectRatio="none" aria-hidden="true">{(data.options||[]).map((o,i,all)=>{const w=wireLayout.width,h=wireLayout.height,x=(i+1)*w/(all.length+1),y=wireLayout.rows[i]||0,lane=w-5-i*7,turn=h-18-i*12;return <path key={o.id} d={`M ${w-36} ${y} H ${lane} V ${turn} H ${x} V ${h}`} fill="none" stroke={branchColors[i]} strokeWidth="2"/>})}</svg>
-        {(data.options||[]).map((o,i,all)=><Handle key={o.id} type="source" id={o.id} position={Position.Bottom} title={`Choix ${i+1} : ${o.label?.fr}`} style={{left:`${(i+1)*100/(all.length+1)}%`,bottom:-6,background:branchColors[i]}}/>)}
+    {data.kind === 'decision' ? <>
+      <div className="decision-routing">
+        {options.map((option, index) => <div key={option.id} className="flow-option" style={{borderLeft:`3px solid ${branchColors[index]}`}}>
+          <span className="flow-option-index" style={{color:branchColors[index]}}>{index + 1} ·</span>
+          <span>{option.label?.fr || 'Choix'}</span>
+        </div>)}
+        <div className="decision-wire-space" aria-hidden="true" />
       </div>
-      : data.kind === 'scene' && <Handle type="source" position={Position.Bottom} id="out" />}
+      <svg className="decision-wires" width={wireLayout.width} height={wireLayout.height}
+        viewBox={`0 0 ${wireLayout.width} ${wireLayout.height}`} preserveAspectRatio="none" aria-hidden="true">
+        {options.map((option, index) => {
+          const row = wireLayout.rows[index];
+          if (!row) return null;
+          const lane = wireLayout.width - 11 - index * 7;
+          const port = ((index + 1) / (options.length + 1)) * wireLayout.width;
+          const turn = Math.max(row.y + 9, wireLayout.height - 17 - (options.length - index - 1) * 10);
+          return <path key={option.id} d={`M ${row.x} ${row.y} H ${lane} V ${turn} H ${port} V ${wireLayout.height - 1}`}
+            fill="none" stroke={branchColors[index]} strokeWidth="2" strokeLinejoin="round" />;
+        })}
+      </svg>
+      {options.map((option, index) => <Handle key={option.id} type="source" id={option.id} position={Position.Bottom}
+        title={`Choix ${index + 1} : ${option.label?.fr || ''}`}
+        style={{left:`${(index + 1) * 100 / (options.length + 1)}%`, bottom:-5, '--port-color':branchColors[index]}} />)}
+    </> : data.kind === 'scene' && <Handle type="source" position={Position.Bottom} id="out" />}
   </div>;
 }
 
@@ -233,7 +276,9 @@ export default function StoryTree() {
     if (!dbNodeId || dirty || !currentLanguage?.id || !videoId) return;
     setMediaBusy(true); setMessage('');
     try {
-      const payload = {mode: 'VIDEO_ORIGINAL', video: videoId, image: null, audio: null};
+      const hasNarration = Boolean(existingSceneMedia?.audio || existingSceneMedia?.voix || existingSceneMedia?.narration_texte?.trim());
+      // Réassocier une vidéo ne doit JAMAIS effacer une narration FR/MG déjà produite.
+      const payload = {mode: hasNarration ? 'VIDEO_AUDIO' : 'VIDEO_ORIGINAL', video: videoId, image: null};
       if (existingSceneMedia) await studioApi.updateScene(existingSceneMedia.id, payload);
       else await studioApi.createScene({ ...payload, noeud: dbNodeId, langue: currentLanguage.id });
       await refresh(); setMessage(`Vidéo associée à ce nœud pour ${videoLang.toUpperCase()}. Lancer le rendu avant publication.`);
@@ -374,7 +419,16 @@ export default function StoryTree() {
                 </>}
               </div>
               <div className="media-inspector-actions"><button className="btn btn-outline" onClick={previewVideo} disabled={!videoId || mediaBusy}><Play size={14}/> Aperçu</button><button className="btn btn-primary" onClick={saveVideo} disabled={!videoId || !currentLanguage || mediaBusy}><Save size={14}/> Associer</button></div>
-              {videoPreview && <video className="node-video-preview" src={videoPreview} controls playsInline/>}
+              {videoPreview && <div className="node-media-preview">
+                {(() => {
+                  const chosen = draftSceneSources({scenes,languages,media,nodeId:dbNodeId,lang:videoLang});
+                  return <>
+                    {chosen.audioLanguage && chosen.audioLanguage !== videoLang && <p className="form-hint">Piste {videoLang.toUpperCase()} absente : narration FR utilisée.</p>}
+                    <ScenePlayback title={selected.data.title?.fr || 'Aperçu du nœud'} video={videoPreview}
+                      audio={chosen.audio} embeddedAudio={false}/>
+                  </>;
+                })()}
+              </div>}
               {existingSceneMedia?.video && <div className="media-link-status"><span>Vidéo liée · {existingSceneMedia.statut}</span><button className="btn btn-outline" onClick={renderVideo} disabled={mediaBusy || existingSceneMedia.statut === 'PROCESSING'}>Lancer le rendu</button><button className="btn btn-outline" onClick={removeVideo} disabled={mediaBusy}><Link2Off size={14}/> Retirer</button></div>}
               {!availableVideos.length && <p className="form-hint">Aucune vidéo importée et validée.</p>}
             </>}

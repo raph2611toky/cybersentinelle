@@ -570,3 +570,120 @@ option {background:#141419;color:#f0f0f5;}
 .studio-scene-preview .scene-playback video,.studio-scene-preview .scene-playback img{max-height:340px}
 
 .studio-preview-row {flex-wrap:wrap}
+
+/* Correctif : sorties de décision et fils colorés ANCRÉS dans le nœud.
+   Seul styles/app.css est importé par main.jsx ; ne pas placer ces règles dans index.css. */
+.flow-node.flow-decision {
+  position: relative;
+  height: auto !important;
+  min-height: 0;
+  max-height: none;
+  overflow: visible;
+  padding-bottom: 0;
+}
+.flow-decision .decision-routing {
+  position: relative;
+  margin-top: 11px;
+  padding: 0 0 63px;
+  z-index: 1;
+}
+.flow-decision .flow-option {
+  display: flex;
+  align-items: flex-start;
+  gap: 4px;
+  position: relative;
+  margin: 6px 34px 0 0;
+  padding: 7px 8px;
+  min-height: 30px;
+  width: auto;
+  max-width: none;
+  line-height: 1.38;
+  overflow-wrap: anywhere;
+  background: #212c4c;
+}
+.flow-option-index { flex: 0 0 auto; font-weight: 800; }
+.decision-wire-space { height: 0; pointer-events: none; }
+.flow-decision .decision-wires {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+  display: block;
+  z-index: 2;
+  pointer-events: none;
+}
+.flow-decision .react-flow__handle.source,
+.flow-decision .react-flow__handle-bottom {
+  z-index: 3;
+  background: var(--port-color,#c084fc) !important;
+  border: 2px solid #11101c !important;
+  width: 11px !important;
+  height: 11px !important;
+}
+.flow-decision .flow-option { z-index: 3; }
+.edge-context-menu { position: fixed; z-index: 10000; padding: 8px; background: #131725; border: 1px solid #665181; box-shadow: 0 8px 35px #0009; border-radius: 8px; }
+
+/* Voix : deux panneaux secondaires repliés + un seul panneau à trois onglets. */
+.voice-collapsible-grid { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 14px; }
+.voice-collapsible { min-width: 0; }
+.voice-collapse-header { display:flex;align-items:center;gap:10px;width:100%;padding:15px 18px;min-height:50px;color:#e8e8ff;background:transparent;border:0;text-align:left; }
+.voice-collapse-header strong { flex:1;font-size:12px; }
+.voice-collapse-header>svg:first-child { color:#c19bff; }
+.voice-collapse-header:hover,.voice-collapse-header[aria-expanded=true] { background:#211b2e; }
+.voice-collapse-body { padding:4px 18px 18px; }
+.voice-workspace { min-width:0; overflow:hidden; }
+.voice-workspace-tabs {display:flex;align-items:stretch;gap:0;border-bottom:1px solid #444052;overflow-x:auto;scrollbar-width:thin;}
+.voice-tab {display:flex;flex:1 1 0;justify-content:center;align-items:center;gap:9px;min-width:155px;padding:15px 12px;font-size:12px;font-weight:700;color:#aeb4c7;background:#101015;border:0;border-right:1px solid #302d3a;border-bottom:2px solid transparent;white-space:nowrap;}
+.voice-tab[aria-selected=true] {color:#efebff;background:#262037;border-bottom-color:#ac87fa;}
+.voice-tab:hover {color:white;background:#292437;}
+.voice-workspace-content {padding:16px 20px 20px;min-width:0;}
+.voice-tab-content {min-width:0;}
+.voice-workspace .studio-preview-row {display:grid;grid-template-columns:40px minmax(170px,1fr) minmax(0,auto);column-gap:12px;row-gap:12px;align-items:center;min-width:0;}
+.voice-workspace .studio-preview-row .resource-list-main {min-width:0;}
+.voice-workspace .studio-preview-row .table-actions {display:flex;align-items:center;justify-content:flex-end;flex-wrap:wrap;gap:7px;min-width:0;}
+.voice-workspace .studio-preview-row .table-actions button.btn {display:inline-flex;width:auto;height:auto;min-height:34px;padding:8px 12px;align-items:center;justify-content:center;gap:5px;white-space:nowrap;border:1px solid #405475;color:#d4dffa;background:#171a25;}
+.voice-workspace .studio-preview-row .table-actions button.btn:hover {border-color:#b08cff;color:white;background:#26203a;}
+.voice-workspace .studio-preview-row .studio-scene-preview {grid-column:1/-1;min-width:0;margin:0;}
+.studio-preview-heading {display:flex;align-items:center;justify-content:space-between;gap:14px;margin-bottom:12px;flex-wrap:wrap;}
+.studio-preview-heading strong {font-size:12px;color:#dfe3f5;}
+.studio-preview-heading label {display:flex;align-items:center;gap:8px;color:#adb6ce;font-size:12px;}
+.studio-preview-heading select {background:#151825;border:1px solid #4b4866;color:#eef0ff;padding:8px 11px;}
+.story-node-row {display:grid;grid-template-columns:minmax(160px,1fr) minmax(168px,.9fr) minmax(168px,.9fr) auto;gap:12px;align-items:center;}
+.story-node-row>div:first-child {min-width:0;}
+.story-node-row .story-node-language {display:flex;gap:7px;align-items:center;justify-content:space-between;min-width:0;}
+.story-node-row .story-node-language span {min-width:0;overflow-wrap:anywhere;}
+.story-node-row .story-node-language .btn,.story-node-row .story-node-actions .btn {display:inline-flex;align-items:center;justify-content:center;width:auto;min-height:34px;padding:8px 10px;white-space:nowrap;}
+.story-node-row .story-node-actions {display:flex;align-items:center;gap:7px;flex-wrap:wrap;}
+
+/* Fenêtre Associer : largeur horizontale accrue et actions toujours accessibles. */
+.dialog-backdrop {padding:12px;overflow:hidden;}
+.dialog {max-height:calc(100dvh - 24px);display:flex;flex-direction:column;min-height:0;overflow:hidden;}
+.dialog-title {flex:0 0 auto;}
+.dialog > .form-stack {min-height:0;overflow-y:auto;overscroll-behavior:contain;padding-right:5px;}
+.dialog.dialog-scene-wide {width:min(1020px,calc(100vw - 28px));max-width:1020px;max-height:min(92dvh,900px);padding:20px 22px 0;}
+.dialog-scene-wide .scene-config-form {display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px 20px;align-content:start;padding:1px 6px 0 0;}
+.dialog-scene-wide .scene-config-form>* {min-width:0;margin:0;}
+.dialog-scene-wide .field {min-width:0;}
+.dialog-scene-wide .field select,.dialog-scene-wide .field input,.dialog-scene-wide .field textarea {max-width:100%;width:100%;min-width:0;}
+.dialog-scene-wide .scene-config-form textarea {min-height:75px;resize:vertical;}
+.dialog-scene-wide .scene-wide-note {grid-column:1/-1;}
+.dialog-scene-wide .scene-sync-settings {grid-column:1/-1;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px 16px;border:1px solid #45415c;padding:14px;}
+.dialog-scene-wide .scene-sync-settings>strong:first-child,
+.dialog-scene-wide .scene-sync-settings>.muted,
+.dialog-scene-wide .scene-sync-settings>.form-hint,
+.dialog-scene-wide .scene-sync-settings>.api-error {grid-column:1/-1;}
+.dialog-scene-wide .scene-sync-settings>.field {min-width:0;}
+.dialog-scene-wide .scene-config-actions {grid-column:1/-1;position:sticky;bottom:0;z-index:5;display:flex;justify-content:flex-end;align-items:center;gap:10px;background:#141419;box-shadow:0 -10px 20px #141419;border-top:1px solid #4b455b;padding:13px 0 16px;margin-top:5px;}
+.dialog-scene-wide .scene-config-actions .btn {min-width:115px;}
+@media (max-width:1160px) { .story-node-row {grid-template-columns:minmax(160px,1fr) repeat(2,minmax(135px,.8fr));}.story-node-row .story-node-actions {grid-column:1/-1;} }
+@media (max-width:800px) { .voice-collapsible-grid {grid-template-columns:1fr;} .voice-workspace .studio-preview-row {grid-template-columns:30px minmax(0,1fr);} .voice-workspace .studio-preview-row .table-actions {grid-column:1/-1;justify-content:flex-start;} .story-node-row {grid-template-columns:1fr 1fr;} .story-node-row>div:first-child,.story-node-row .story-node-actions {grid-column:1/-1;} .dialog-scene-wide .scene-config-form,.dialog-scene-wide .scene-sync-settings {grid-template-columns:1fr;} .dialog-scene-wide .scene-sync-settings>* {grid-column:1/-1;} }
+@media (max-width:520px) { .story-node-row {grid-template-columns:1fr;} .story-node-row .story-node-language {grid-column:1/-1;} .voice-workspace-content {padding:12px;} .dialog.dialog-scene-wide {width:calc(100vw - 16px);max-height:calc(100dvh - 16px);padding:14px 14px 0;} .dialog-backdrop {padding:8px;} }
+
+/* Prévisualisation du nœud : audio FR/MG synchronisé avec le MP4 choisi. */
+.node-media-preview { min-width:0; width:100%; border:1px solid #4e436b; background:#0b0b13; }
+.node-media-preview .scene-playback > video { max-height:230px; }
+.node-media-preview .scene-playback-start { margin:8px 12px; }
+/* Fond uni à l'intérieur des nouveaux panneaux, dans la palette actuelle. */
+.voice-collapsible,.voice-workspace {background:#121216;border:1px solid #36313e;}
+.voice-workspace-content {background:#121216;}
