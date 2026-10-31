@@ -111,11 +111,12 @@ class SceneMedia(ModeleBase):
     audio_finale = models.ForeignKey(MediaAsset, null=True, blank=True, on_delete=models.PROTECT, related_name='scene_audio_renders')
 
     class SyncMode(models.TextChoices):
+        FREEZE_LAST = 'FREEZE_LAST', 'Durées libres : figer la dernière image après la vidéo'
         SPEED = 'SPEED', 'Vitesse pour ajuster la narration entière'
         TRIM = 'TRIM', 'Découper un segment (vitesse normale)'
         TRIM_SPEED = 'TRIM_SPEED', 'Découper puis ajuster la vitesse'
 
-    sync_mode = models.CharField(max_length=12, choices=SyncMode.choices, default=SyncMode.SPEED)
+    sync_mode = models.CharField(max_length=12, choices=SyncMode.choices, default=SyncMode.FREEZE_LAST)
     audio_trim_start_ms = models.PositiveIntegerField(default=0)
     audio_trim_end_ms = models.PositiveIntegerField(null=True, blank=True)
 

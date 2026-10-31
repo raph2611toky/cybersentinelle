@@ -17,7 +17,7 @@ export default function Voice() {
   const [catalogBusy,setCatalogBusy] = useState(false);
   const [catalogNote,setCatalogNote] = useState('');
   const [voiceForm,setVoiceForm] = useState({nom:'',langue:'',provider:'GOOGLE_CLOUD',model_id:'',voice_id:'',style:''});
-  const blankScene = () => ({noeud:'',langue:'',mode:'TEXT_ONLY',image:'',video:'',audio:'',narration_texte:'',voix:'',sync_mode:'SPEED',audio_trim_start_ms:0,audio_trim_end_ms:null});
+  const blankScene = () => ({noeud:'',langue:'',mode:'TEXT_ONLY',image:'',video:'',audio:'',narration_texte:'',voix:'',sync_mode:'FREEZE_LAST',audio_trim_start_ms:0,audio_trim_end_ms:null});
   const [sceneForm,setSceneForm] = useState(blankScene);
   const [audioUpload,setAudioUpload] = useState({file:null, title:'',licence:'',rights:false});
   const [uploadBusy,setUploadBusy] = useState(false);
@@ -30,11 +30,11 @@ export default function Voice() {
   const trimFrom = Number(sceneForm.audio_trim_start_ms || 0);
   const trimTo = sceneForm.audio_trim_end_ms === null || sceneForm.audio_trim_end_ms === '' ? audioMs : Number(sceneForm.audio_trim_end_ms);
   const selectedMs = Math.max(0, trimTo - trimFrom);
-  const rate = videoMs ? (sceneForm.sync_mode === 'SPEED' ? audioMs / videoMs : sceneForm.sync_mode === 'TRIM' ? 1 : selectedMs / videoMs) : 1;
+  const rate = sceneForm.sync_mode === 'FREEZE_LAST' ? 1 : videoMs ? (sceneForm.sync_mode === 'SPEED' ? audioMs / videoMs : sceneForm.sync_mode === 'TRIM' ? 1 : selectedMs / videoMs) : 1;
   const syncError = sceneForm.mode==='VIDEO_AUDIO'&&audioMs&&videoMs
-    ? (sceneForm.sync_mode!=='SPEED'&&(trimFrom<0||trimTo<=trimFrom||trimTo>audioMs) ? 'Segment audio hors de la durée du fichier.'
+    ? (!['SPEED','FREEZE_LAST'].includes(sceneForm.sync_mode)&&(trimFrom<0||trimTo<=trimFrom||trimTo>audioMs) ? 'Segment audio hors de la durée du fichier.'
     : sceneForm.sync_mode==='TRIM'&&Math.abs(selectedMs-videoMs)>20 ? 'Le segment doit avoir exactement la durée de la vidéo. Utilise « Ajuster la fin ».'
-    : (sceneForm.sync_mode!=='TRIM'&&(rate<0.5||rate>2.5)) ? 'Vitesse nécessaire hors limites (0,5× à 2,5×). Sélectionne un segment plus court.' : '') : '';
+    : (!['TRIM','FREEZE_LAST'].includes(sceneForm.sync_mode)&&(rate<0.5||rate>2.5)) ? 'Vitesse nécessaire hors limites (0,5× à 2,5×). Sélectionne un segment plus court.' : '') : '';
   const formattedDuration = value => (value / 1000).toFixed(2).replace('.', ',') + ' s';
   const supported = typeof window !== 'undefined' && 'speechSynthesis' in window;
   const availableNodes = useMemo(() => nodes.filter(n => ['SCENE','ENDING'].includes(n.type)),[nodes]);
@@ -109,7 +109,7 @@ export default function Voice() {
   const openScene=()=>{setError('');setAudioUpload({file:null,title:'',licence:'',rights:false});setSceneForm({...blankScene(),langue:languages.find(l=>l.code==='fr')?.id||''});setDialog('scene')};
   const editScene=(sc)=>{setError('');setAudioUpload({file:null,title:'',licence:'',rights:false});setSceneForm({
     noeud:sc.noeud,langue:sc.langue,mode:sc.mode,image:sc.image||'',video:sc.video||'',audio:sc.audio||'',
-    narration_texte:sc.narration_texte||'',voix:sc.voix||'',sync_mode:sc.sync_mode||'SPEED',
+    narration_texte:sc.narration_texte||'',voix:sc.voix||'',sync_mode:sc.sync_mode||'FREEZE_LAST',
     audio_trim_start_ms:sc.audio_trim_start_ms||0,audio_trim_end_ms:sc.audio_trim_end_ms??null,
   });setDialog('scene')};
   const uploadAudio=async()=>{
@@ -207,14 +207,15 @@ export default function Voice() {
         <Field label="Narration TTS facultative"><textarea rows={3} value={sceneForm.narration_texte} onChange={e=>setSceneForm(p=>({...p,narration_texte:e.target.value}))}/></Field>
         {sceneForm.mode==='VIDEO_AUDIO'&&<div className="form-stack" style={{border:'1px solid #45415c',padding:14}}>
           <strong>Synchronisation audio / vidéo</strong>
-          <small className="muted">Aucune narration n'est coupée ou prolongée sans réglage explicite. Les durées sont vérifiées par FFprobe au rendu.</small>
+          <small className="muted">La voix et la vidéo démarrent ensemble. En mode « Figer la dernière image », aucune parole n'est coupée et la vitesse ne change pas. Les autres réglages restent disponibles.</small>
           <div className="form-hint">Vidéo : {videoMs?formattedDuration(videoMs):'à sélectionner'} · Audio : {audioMs?formattedDuration(audioMs):'à importer ou générer'}</div>
           <Field label="Méthode d'ajustement"><select value={sceneForm.sync_mode} onChange={e=>setSceneForm(v=>({...v,sync_mode:e.target.value,audio_trim_start_ms:0,audio_trim_end_ms:null}))}>
+            <option value="FREEZE_LAST">Conserver les durées · figer la dernière image si besoin (recommandé)</option>
             <option value="SPEED">Adapter la vitesse de toute la voix</option>
             <option value="TRIM">Découper un segment (vitesse 1×)</option>
             <option value="TRIM_SPEED">Découper puis ajuster sa vitesse</option>
           </select></Field>
-          {sceneForm.sync_mode!=='SPEED'&&<>
+          {!['SPEED','FREEZE_LAST'].includes(sceneForm.sync_mode)&&<>
             <Field label="Début du segment audio (secondes)"><input type="number" min="0" step="0.01" value={trimFrom/1000} onChange={e=>setSceneForm(v=>({...v,audio_trim_start_ms:Math.round(Number(e.target.value)*1000)}))}/></Field>
             <Field label="Fin du segment audio (secondes)"><input type="number" min="0" step="0.01" value={sceneForm.audio_trim_end_ms===null?'':Number(sceneForm.audio_trim_end_ms)/1000} placeholder="Fin du fichier" onChange={e=>setSceneForm(v=>({...v,audio_trim_end_ms:e.target.value===''?null:Math.round(Number(e.target.value)*1000)}))}/></Field>
             {videoMs>0&&<button type="button" className="btn btn-outline" onClick={()=>setSceneForm(v=>({...v,audio_trim_end_ms:Number(v.audio_trim_start_ms||0)+videoMs}))}>Ajuster la fin à la durée vidéo (1×)</button>}
@@ -223,9 +224,11 @@ export default function Voice() {
             <Field label="Vitesse souhaitée (0,5× à 2,5×)"><input type="number" min="0.5" max="2.5" step="0.05" value={targetSpeed} onChange={e=>{setTargetSpeed(e.target.value);const speed=Number(e.target.value);if(Number.isFinite(speed)&&speed>=0.5&&speed<=2.5)setSceneForm(v=>({...v,audio_trim_end_ms:Math.round(Number(v.audio_trim_start_ms||0)+videoMs*speed)}))}}/></Field>
             <small className="muted">Changer la vitesse ajuste automatiquement la fin du segment. Tu peux aussi ajuster librement les bornes.</small>
           </>}
-          {audioMs>0&&videoMs>0&&<strong className="form-hint">Segment : {formattedDuration(sceneForm.sync_mode==='SPEED'?audioMs:selectedMs)} · Vitesse appliquée : {rate.toFixed(2)}× · Durée finale cible : {formattedDuration(videoMs)}</strong>}
+          {audioMs>0&&videoMs>0&&<strong className="form-hint">{sceneForm.sync_mode==='FREEZE_LAST'
+            ? `Audio intégral : ${formattedDuration(audioMs)} · Vidéo originale : ${formattedDuration(videoMs)} · Durée finale : ${formattedDuration(Math.max(audioMs,videoMs))} · Dernière image figée pendant ${formattedDuration(Math.max(0,audioMs-videoMs))}`
+            : `Segment : ${formattedDuration(sceneForm.sync_mode==='SPEED'?audioMs:selectedMs)} · Vitesse appliquée : ${rate.toFixed(2)}× · Durée finale cible : ${formattedDuration(videoMs)}`}</strong>}
           {syncError&&<p className="api-error" role="alert">{syncError}</p>}
-          <small className="muted">La vitesse est calculée depuis le segment et la durée de la vidéo ; plage de sécurité 0,5× à 2,5×. Les écarts sont refusés, jamais corrigés par une coupe invisible.</small>
+          <small className="muted">Mode durées libres : audio naturel à 1×, aucune coupe, fin de la vidéo figée à sa résolution native. Si la voix est plus courte, l'image animée continue jusqu'à la fin de la vidéo. Les autres modes conservent leurs limites de vitesse et de découpage.</small>
         </div>}
       </>}
       {error&&<p className="api-error" role="alert">{error}</p>}

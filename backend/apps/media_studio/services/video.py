@@ -1,4 +1,7 @@
-"""Montage FFmpeg sûr : ajuste EXPLICITEMENT l'audio à la durée vidéo.
+"""Montage FFmpeg sûr : inclut un mode de narration intégrale sans ajustement forcé.
+
+Mode FREEZE_LAST: les deux pistes commencent à 0, vitesse normale et sans coupe ;
+la dernière frame est répétée sans agrandissement si la voix dure plus longtemps.
 
 Mode SPEED: lecture de tout l'audio à la vitesse exacte nécessaire.
 Mode TRIM: coupe un segment exactement égal à la durée vidéo, vitesse 1x.
@@ -93,6 +96,8 @@ def _sync_plan(scene, source_seconds, video_seconds):
     mode = scene.sync_mode or SceneMedia.SyncMode.SPEED
     start = (scene.audio_trim_start_ms or 0) / 1000.0
     end = (scene.audio_trim_end_ms / 1000.0) if scene.audio_trim_end_ms is not None else source_seconds
+    if mode == SceneMedia.SyncMode.FREEZE_LAST:
+        return 0.0, source_seconds, 1.0
     if mode == SceneMedia.SyncMode.SPEED:
         start, end = 0.0, source_seconds
     if start < 0 or end <= start or end > source_seconds + 0.025:
@@ -163,7 +168,11 @@ def render_audio_only(scene):
 
 
 def render_scene(scene):
-    """Produit une vidéo avec narration ayant la même durée que la vidéo source."""
+    """Produit une vidéo; FREEZE_LAST préserve la voix et fige la dernière image.
+
+    Les fichiers sources gardent leurs durées respectives. Seul le fichier final
+    contient une piste vidéo étendue pour accompagner toute la narration.
+    """
     from ..models import SceneMedia
     mode = scene.mode
     if mode in (SceneMedia.Mode.TEXT_ONLY, SceneMedia.Mode.AUDIO_ONLY):
@@ -181,18 +190,30 @@ def render_scene(scene):
             inputs = ['-loop', '1', '-framerate', '25', '-i', scene.image.fichier.path]
         else:
             length = duration_sec(scene.video.fichier.path, 'video')
-            target = math.ceil(length * 25) / 25
+            video_target = math.ceil(length * 25) / 25
+            target = video_target
             inputs = ['-i', scene.video.fichier.path]
             if mode == SceneMedia.Mode.VIDEO_AUDIO:
                 src, audio_duration = _normalized_audio(_audio_sources(scene), tmp)
-                audio_plan = _sync_plan(scene, audio_duration, target)
+                if scene.sync_mode == SceneMedia.SyncMode.FREEZE_LAST:
+                    # Ne modifier ni la voix ni la vitesse des images : le montage se
+                    # termine seulement quand les deux médias ont terminé.
+                    target = math.ceil(max(length, audio_duration) * 25) / 25
+                audio_plan = _sync_plan(scene, audio_duration, video_target)
         if target <= 0 or target > settings.STUDIO_MAX_MEDIA_SECONDS:
             raise RenderError('RENDER_DURATION_LIMIT')
         filters = []
-        frame = 'scale=w=1280:h=720:force_original_aspect_ratio=decrease,pad=1280:720:(ow-iw)/2:(oh-ih)/2,setsar=1,fps=25'
+        # Préserver la résolution native dans la limite Full HD, sans agrandissement
+        # artificiel (une montée à 1280x720 pixelliserait les petites vidéos).
+        # Garantir des dimensions paires pour H.264/yuv420p.
+        frame = ("scale=w='min(iw,1920)':h='min(ih,1080)':"
+                 'force_original_aspect_ratio=decrease:force_divisible_by=2,'
+                 'setsar=1,fps=25')
         if mode != SceneMedia.Mode.IMAGE_AUDIO:
-            # Marginale extension de dernière frame pour les vidéos à durée non multiple de 40 ms.
-            frame += ',tpad=stop_mode=clone:stop_duration=0.120'
+            # Répète la DERNIÈRE vraie frame jusqu'à la fin de la narration.
+            # tpad clone une image décodée, sans créer une capture basse qualité.
+            extension = max(0.120, target - length + 0.160)
+            frame += f',tpad=stop_mode=clone:stop_duration={extension:.6f}'
         filters.append(f'[0:v:0]{frame},trim=duration={target:.6f},setpts=PTS-STARTPTS[vout]')
         mapping = ['-map', '[vout]']
         if mode == SceneMedia.Mode.VIDEO_ORIGINAL:
@@ -210,7 +231,7 @@ def render_scene(scene):
         _run(['ffmpeg', '-nostdin', '-hide_banner', '-loglevel', 'error', '-y',
               *inputs, '-filter_complex', ';'.join(filters), *mapping,
               '-t', f'{target:.6f}', '-c:v', 'libx264', '-pix_fmt', 'yuv420p',
-              '-preset', 'veryfast', '-crf', '26', '-c:a', 'aac', '-b:a', '128k',
+              '-preset', 'medium', '-crf', '18', '-c:a', 'aac', '-b:a', '128k',
               '-movflags', '+faststart', str(output)])
         _check_final(output, target, audio=mode != SceneMedia.Mode.VIDEO_ORIGINAL)
         return _validate_result(output)
