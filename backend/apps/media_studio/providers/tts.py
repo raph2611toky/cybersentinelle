@@ -5,6 +5,7 @@ import os
 import re
 import urllib.error
 import urllib.request
+import urllib.parse
 from django.conf import settings
 
 
@@ -83,4 +84,97 @@ def synthesize(profile, text):
             return data, '.wav', 'audio/wav'
         except (ValueError, TypeError, KeyError, base64.binascii.Error):
             raise ProviderError('TTS_BAD_AUDIO') from None
+    if provider == 'GOOGLE_CLOUD':
+        # Les identifiants GCP existants sont utilisés (service account), jamais une clé placée dans l'URL.
+        import google.auth
+        from google.auth.transport.requests import Request
+        try:
+            credentials, _ = google.auth.default(scopes=['https://www.googleapis.com/auth/cloud-platform'])
+            if not credentials.valid:
+                credentials.refresh(Request())
+        except Exception:
+            raise ProviderError('TTS_GOOGLE_CREDENTIALS') from None
+        locale = {'fr': 'fr-FR', 'mg': 'mg-MG'}[profile.langue.code]
+        req = urllib.request.Request('https://texttospeech.googleapis.com/v1/text:synthesize',
+            data=json.dumps({'input': {'text': text},
+                             'voice': {'languageCode': locale, 'name': profile.voice_id},
+                             'audioConfig': {'audioEncoding': 'MP3', 'speakingRate': 1.0}}).encode('utf-8'),
+            method='POST', headers={'Authorization': f'Bearer {credentials.token}', 'Content-Type': 'application/json'})
+        try:
+            with urllib.request.urlopen(req, timeout=settings.STUDIO_PROVIDER_TIMEOUT) as response:
+                result = json.load(response)
+            data = base64.b64decode(result['audioContent'], validate=True)
+            if not data or len(data) > settings.STUDIO_MAX_TTS_RESULT_BYTES:
+                raise ProviderError('TTS_BAD_AUDIO')
+            return data, '.mp3', 'audio/mpeg'
+        except urllib.error.HTTPError as exc:
+            if exc.code == 429:
+                raise ProviderError('TTS_QUOTA_EXCEEDED') from None
+            raise ProviderError('TTS_PROVIDER_ERROR') from None
+        except (urllib.error.URLError, TimeoutError, OSError, ValueError, KeyError, TypeError):
+            raise ProviderError('TTS_UNAVAILABLE') from None
     raise ProviderError('TTS_PROVIDER_DISABLED')
+
+
+
+def list_provider_voices(provider, language):
+    """Returns only voices exposed to this authenticated account; no fake/unlimited voices."""
+    if provider not in {'ELEVENLABS', 'GOOGLE_CLOUD'} or language not in {'fr', 'mg'}:
+        raise ProviderError('TTS_CONFIGURATION_INVALID')
+    if provider not in settings.STUDIO_TTS_PROVIDERS:
+        raise ProviderError('TTS_PROVIDER_DISABLED')
+    if provider == 'ELEVENLABS':
+        key = os.getenv('ELEVENLABS_API_KEY', '').strip()
+        if not key:
+            raise ProviderError('TTS_KEY_MISSING')
+        results = []
+        page_token = None
+        for _ in range(4):  # borne de sécurité : 4 pages de 25 voix max
+            params = {'page_size': 25}
+            if page_token:
+                params['next_page_token'] = page_token
+            url = 'https://api.elevenlabs.io/v2/voices?' + urllib.parse.urlencode(params)
+            request = urllib.request.Request(url, headers={'xi-api-key': key})
+            try:
+                with urllib.request.urlopen(request, timeout=20) as response:
+                    payload = json.load(response)
+            except urllib.error.HTTPError as exc:
+                raise ProviderError('TTS_QUOTA_EXCEEDED' if exc.code == 429 else 'TTS_PROVIDER_ERROR') from None
+            except (urllib.error.URLError, OSError, TimeoutError, ValueError):
+                raise ProviderError('TTS_UNAVAILABLE') from None
+            for v in payload.get('voices', []):
+                if not v.get('voice_id') or not v.get('name'):
+                    continue
+                # API free: shared Voice Library entries can be unavailable; do not declare them free.
+                tier = v.get('available_for_tiers')
+                if isinstance(tier, list) and tier and 'free' not in [s.lower() for s in tier]:
+                    continue
+                results.append({'name': v['name'][:100], 'voice_id': v['voice_id'],
+                                'model_id': 'eleven_multilingual_v2', 'provider': provider,
+                                'note': 'Disponibilité et consommation vérifiées à la synthèse'})
+            page_token = payload.get('next_page_token') if payload.get('has_more') else None
+            if not page_token:
+                break
+        return results
+    # Google Cloud: voix officielles de l'API, sans présumer la disponibilité de mg-MG.
+    import google.auth
+    from google.auth.transport.requests import Request
+    try:
+        credentials, _ = google.auth.default(scopes=['https://www.googleapis.com/auth/cloud-platform'])
+        if not credentials.valid:
+            credentials.refresh(Request())
+    except Exception:
+        raise ProviderError('TTS_GOOGLE_CREDENTIALS') from None
+    locale = {'fr': 'fr-FR', 'mg': 'mg-MG'}[language]
+    url = 'https://texttospeech.googleapis.com/v1/voices?' + urllib.parse.urlencode({'languageCode': locale})
+    request = urllib.request.Request(url, headers={'Authorization': f'Bearer {credentials.token}'})
+    try:
+        with urllib.request.urlopen(request, timeout=20) as response:
+            payload = json.load(response)
+    except urllib.error.HTTPError as exc:
+        raise ProviderError('TTS_QUOTA_EXCEEDED' if exc.code == 429 else 'TTS_PROVIDER_ERROR') from None
+    except (urllib.error.URLError, OSError, TimeoutError, ValueError):
+        raise ProviderError('TTS_UNAVAILABLE') from None
+    return [{'name': v['name'], 'voice_id': v['name'], 'model_id': 'cloud-tts', 'provider': provider,
+             'note': 'Tarification Google Cloud selon le modèle et les quotas'}
+            for v in payload.get('voices', []) if v.get('name') and '-Standard-' in v['name'] and locale in v.get('languageCodes', [])][:100]

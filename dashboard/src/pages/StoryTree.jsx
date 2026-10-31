@@ -20,7 +20,7 @@ function StoryNode({ data, selected }) {
   const icon = data.kind === 'decision' ? <GitBranch size={17}/> : data.kind === 'ending' ? <Flag size={17}/> : <BookOpen size={17}/>;
   return <div className={`flow-node flow-${data.kind} ${selected ? 'flow-selected' : ''}`}>
     <Handle type="target" position={Position.Top} id="in" />
-    <div className="flow-node-header">{icon}<span>{data.kind === 'decision' ? 'DÉCISION' : data.kind === 'ending' ? 'FIN' : 'SCÈNE'}</span>{data.hasVideo && <span className="flow-video-tag"><Video size={11}/> VIDÉO</span>}</div>
+    <div className="flow-node-header">{icon}<span>{data.kind === 'decision' ? 'DÉCISION' : data.kind === 'ending' ? 'FIN' : 'SCÈNE'}</span>{(data.hasVideo || data.media?.asset) && <span className="flow-video-tag"><Video size={11}/> MÉDIA</span>}</div>
     <strong>{data.title?.fr || 'Sans titre'}</strong>
     <small>{data.text?.fr || 'Cliquer pour modifier'}</small>
     {data.kind === 'decision'
@@ -127,6 +127,7 @@ export default function StoryTree() {
   const currentLanguage = languages.find(l => l.code === videoLang);
   const existingSceneMedia = scenes.find(s => s.noeud === dbNodeId && s.langue === currentLanguage?.id);
   const availableVideos = media.filter(m => m.type === 'VIDEO' && m.droits_confirmes);
+  const availableAssets = media.filter(m => ['VIDEO','IMAGE'].includes(m.type) && m.droits_confirmes);
   const issues = useMemo(() => validateGraph({nodes, edges}), [nodes, edges]);
   const flowNodes = useMemo(() => nodes.map(n => ({
     ...n, data: {...n.data, hasVideo: Boolean(nodeIdMap[n.id] && scenes.some(s => s.noeud === nodeIdMap[n.id] && s.video))},
@@ -331,8 +332,23 @@ export default function StoryTree() {
             <button className="btn btn-outline full-width" onClick={addOption} disabled={(selected.data.options || []).length >= 3}><Plus size={15}/> Ajouter un choix</button>
           </div>}
           {['scene','ending'].includes(selected.data.kind) && <div className="node-media-editor">
+            <div className="panel-title"><Clapperboard size={16}/> Image / vidéo de la scène</div>
+            <p className="form-hint">Sélectionne un fichier dès le brouillon. L'association sera conservée puis créée dans Django lorsque tu appliqueras l'arbre.</p>
+            <Field label="Média de la médiathèque">
+              <select value={selected.data.media?.asset || ''} onChange={e => {
+                const asset = availableAssets.find(a => String(a.id) === e.target.value);
+                modifySelected({media: asset ? {asset:String(asset.id),kind:asset.type} : null});
+              }}>
+                <option value="">{existingSceneMedia?.video || existingSceneMedia?.image ? 'Média actuel déjà associé dans Django' : 'Sans média (texte seulement)'}</option>
+                {availableAssets.map(asset => <option key={asset.id} value={asset.id}>{asset.type === 'IMAGE' ? '🖼' : '🎬'} {asset.titre}</option>)}
+              </select>
+            </Field>
+            {!availableAssets.length && <p className="form-hint">Importe d'abord une image ou une vidéo avec droits confirmés dans la médiathèque.</p>}
+            {!!selected.data.media?.asset && <div className="media-link-status">Média choisi : {availableAssets.find(m => String(m.id) === String(selected.data.media.asset))?.titre || 'Référence introuvable'} · en attente d’application</div>}
+            <p className="form-hint">Après « Enregistrer » puis « Appliquer au backend », configure la voix FR ou MG dans « Voix & audio ».</p>
+            <hr className="subtle-divider" />
             <div className="panel-title"><Clapperboard size={16}/> Vidéo du nœud</div>
-            {!dbNodeId || dirty ? <p className="form-hint">Enregistre puis applique l’arbre au backend pour associer une vidéo à ce nœud.</p> : <>
+            {!dbNodeId || dirty ? <p className="form-hint">Tu peux déjà choisir une image/vidéo ci-dessus et enregistrer le brouillon. L'application de l'arbre exige les décisions attendues et les traductions FR/MG validées.</p> : <>
               <Field label="Langue"><select value={videoLang} onChange={e => setVideoLang(e.target.value)}><option value="fr">Français</option><option value="mg">Malagasy</option></select></Field>
               <Field label="Vidéo de la médiathèque"><select value={videoId} onChange={e => {closePreview();setVideoId(e.target.value);}}><option value="">Choisir une vidéo</option>{availableVideos.map(m => <option key={m.id} value={m.id}>{m.titre}</option>)}</select></Field>
               <div className="node-media-upload">

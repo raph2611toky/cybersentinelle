@@ -20,6 +20,7 @@ from .permissions import StudioPermissions
 from .serializers import (MediaAssetSerializer, MediaUploadInput, MediaMetadataInput, VoiceSerializer,
     SceneSerializer, DialogueSerializer, JobSerializer, TTSInput)
 from .services.media import persist_upload
+from .providers.tts import list_provider_voices, ProviderError
 from .tasks import process_studio_job
 from . import swagger as docs
 
@@ -331,6 +332,26 @@ class ScenePatchAPIView(APIView):
             return failed(exc)
 
 
+class VoiceCatalogAPIView(APIView):
+    permission_classes = [StudioPermissions]
+    required_permission = 'media_studio.view_voiceprofile'
+
+    @docs.voice_catalog_doc
+    def get(self, request):
+        try:
+            provider = request.query_params.get('provider', 'GOOGLE_CLOUD').upper()
+            language = request.query_params.get('language', 'fr').lower()
+            if provider not in {'ELEVENLABS', 'GOOGLE_CLOUD'} or language not in {'fr', 'mg'}:
+                return error(400, 'BAD_REQUEST', 'Fournisseur ou langue non pris en charge')
+            return Response({'provider': provider, 'language': language,
+                             'results': list_provider_voices(provider, language)})
+        except ProviderError as exc:
+            # Code stable et sans secrets, utile pour afficher pourquoi le catalogue est vide.
+            return error(503, exc.code, 'Catalogue indisponible : configuration, accès ou quota à vérifier')
+        except Exception as exc:
+            return failed(exc)
+
+
 class VoiceListAPIView(APIView):
     permission_classes = [StudioPermissions]
     required_permission = 'media_studio.view_voiceprofile'
@@ -398,8 +419,8 @@ class RenderCreateAPIView(APIView):
                 return error(400, 'BAD_REQUEST', 'Aucun média à assembler')
             if scene.mode in {SceneMedia.Mode.IMAGE_AUDIO, SceneMedia.Mode.VIDEO_AUDIO} and not scene.audio_id:
                 complete_lines = scene.dialogues.exists() and not scene.dialogues.filter(audio__isnull=True).exists()
-                if not complete_lines and not (scene.voix_id and scene.narration_texte.strip()):
-                    return error(400, 'BAD_REQUEST', 'Fournir un audio, les répliques sonorisées, ou une narration et une voix')
+                if not complete_lines:
+                    return error(400, 'BAD_REQUEST', 'Générer ou importer la narration avant le rendu : aucun TTS implicite facturable.')
             if scene.jobs.filter(statut__in=['PENDING', 'RUNNING']).exists():
                 return conflict()
             job = GenerationJob.objects.create(type='RENDER', scene=scene)

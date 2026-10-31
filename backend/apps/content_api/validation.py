@@ -4,7 +4,7 @@ from django.core.exceptions import ValidationError
 from apps.core.choices import TypeNoeud
 
 
-def validate_story_graph(story):
+def validate_story_graph(story, *, require_complete=True):
     nodes = list(
         story.noeuds.select_related("noeud_suivant", "visuel").prefetch_related(
             "options__noeud_cible"
@@ -26,7 +26,7 @@ def validate_story_graph(story):
         n = mapping[key]
         visited_global.add(key)
         if n.type == TypeNoeud.ENDING:
-            if decisions != story.decisions_attendues:
+            if (decisions != story.decisions_attendues if require_complete else decisions > story.decisions_attendues):
                 raise ValidationError(
                     f"{story.slug}: parcours avec {decisions} décisions, attendu {story.decisions_attendues}"
                 )

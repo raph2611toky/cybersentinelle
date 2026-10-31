@@ -21,6 +21,7 @@ urlpatterns = [
     path('dialogues/<uuid:pk>/update/', views.DialoguePatchAPIView.as_view(), name='studio-dialogues-update'),
     path('dialogues/<uuid:pk>/delete/', views.DialogueDeleteAPIView.as_view(), name='studio-dialogues-delete'),
     path('voices/', views.VoiceListAPIView.as_view(), name='studio-voices-list'),
+    path('voices/catalog/', views.VoiceCatalogAPIView.as_view(), name='studio-voices-catalog'),
     path('voices/<uuid:pk>/', views.VoiceDetailAPIView.as_view(), name='studio-voices-detail'),
     path('voices/<uuid:pk>/update/', views.VoicePatchAPIView.as_view(), name='studio-voices-update'),
     path('voices/<uuid:pk>/delete/', views.VoiceDeleteAPIView.as_view(), name='studio-voices-delete'),

@@ -67,6 +67,7 @@ class VoiceProfile(ModeleBase):
     class Provider(models.TextChoices):
         GEMINI = 'GEMINI', 'Gemini Developer API'
         ELEVENLABS = 'ELEVENLABS', 'ElevenLabs'
+        GOOGLE_CLOUD = 'GOOGLE_CLOUD', 'Google Cloud Text-to-Speech'
 
     nom = models.CharField(max_length=100)
     langue = models.ForeignKey(Langue, on_delete=models.PROTECT, related_name='voix_studio')

@@ -1,6 +1,7 @@
 """Brouillon React Flow + conversion explicite et transactionnelle en graphe relationnel."""
 import re
 import math
+import uuid
 from collections import defaultdict
 from django.core.exceptions import ValidationError
 from django.db import transaction
@@ -56,9 +57,20 @@ def sanitize_graph(payload):
         except (ValueError,TypeError):raise APIValidationError({'nodes':[f'Position ou poids invalide : {key}']})
         if not all(math.isfinite(v) and abs(v)<1_000_000 for v in (x,y)):
             raise APIValidationError({'nodes':[f'Position hors limites : {key}']})
+        # Le choix de média appartient au brouillon, avant même que le nœud ait un PK Django.
+        media_choice = data.get('media')
+        if media_choice is not None:
+            if data['kind'] == 'decision' or not isinstance(media_choice, dict):
+                raise APIValidationError({'media': [f'Média interdit ou invalide sur {key}']})
+            if set(media_choice) != {'asset', 'kind'} or media_choice.get('kind') not in ('VIDEO', 'IMAGE'):
+                raise APIValidationError({'media': [f'Type de média invalide sur {key}']})
+            try:
+                media_choice = {'asset': str(uuid.UUID(str(media_choice['asset']))), 'kind': media_choice['kind']}
+            except (ValueError, TypeError, AttributeError):
+                raise APIValidationError({'media': [f'Identifiant de média invalide sur {key}']}) from None
         nodes.append({'id':key,'type':'story','position':{'x':x, 'y':y},
                       'data':{'kind':data['kind'],'title':localized('title'),'text':localized('text'),
-                              'weight':max(1,min(100,weight)), 'options':options}})
+                              'weight':max(1,min(100,weight)), 'options':options, 'media': media_choice}})
     edges=[]
     used_handles=set()
     for item in payload['edges']:
@@ -131,8 +143,8 @@ def apply_graph(story, graph):
     traverse('start',set(),0)
     if len(visited)!=len(mapping) or not terminal:
         raise APIValidationError({'graph':['Nœuds inaccessibles ou sans fin']})
-    if any(n!=story.decisions_attendues for n in decisions):
-        raise APIValidationError({'graph':[f'Chaque parcours doit avoir exactement {story.decisions_attendues} décisions']})
+    if any(n > story.decisions_attendues for n in decisions):
+        raise APIValidationError({'graph':[f'Chaque parcours doit avoir au maximum {story.decisions_attendues} décisions avant publication']})
     with transaction.atomic():
         old={n.cle:n for n in Noeud.objects.select_for_update().filter(tantara=story)}
         removed=[n for key,n in old.items() if key not in mapping]
@@ -168,8 +180,42 @@ def apply_graph(story, graph):
                    feedback_fr=o['feedback']['fr'],feedback_mg=o['feedback']['mg'],qualite=o['quality'],
                    noeud_cible=objects[target],ordre=i)
                 opt.full_clean();opt.save()
+        # Appliquer les médias choisis dans l'éditeur visuel : création automatique d'un SceneMedia FR.
+        # Pour MG, l'éditeur audio permet ensuite de créer une association/langue distincte.
+        from apps.core.models import Langue
+        from apps.media_studio.models import MediaAsset, SceneMedia
+        lang = Langue.objects.filter(code='fr', actif=True).first()
+        if any(n['data'].get('media') for n in mapping.values()) and not lang:
+            raise APIValidationError({'media': ['Initialiser la langue française avant d’appliquer les médias']})
+        for key, node in mapping.items():
+            if node['data']['kind'] not in ('scene', 'ending'):
+                continue
+            choice = node['data'].get('media')
+            if choice is None:
+                continue  # ne pas supprimer les liens historiques si aucun choix explicite
+            asset = MediaAsset.objects.filter(pk=choice['asset'], type=choice['kind'], droits_confirmes=True).first()
+            if not asset:
+                raise APIValidationError({'media': [f'Média introuvable, non conforme ou droits non confirmés : {key}']})
+            existing = SceneMedia.objects.filter(noeud=objects[key], langue=lang).first()
+            new_mode = SceneMedia.Mode.VIDEO_ORIGINAL if choice['kind'] == 'VIDEO' else SceneMedia.Mode.IMAGE_AUDIO
+            if existing and (
+                    (existing.video_id == asset.pk and new_mode == SceneMedia.Mode.VIDEO_ORIGINAL
+                     and existing.mode in (SceneMedia.Mode.VIDEO_ORIGINAL, SceneMedia.Mode.VIDEO_AUDIO)) or
+                    (existing.image_id == asset.pk and new_mode == SceneMedia.Mode.IMAGE_AUDIO
+                     and existing.mode == SceneMedia.Mode.IMAGE_AUDIO)):
+                continue  # conserver les voix/audio et rendus déjà préparés
+            if not existing:
+                existing = SceneMedia(noeud=objects[key], langue=lang)
+            existing.mode = new_mode
+            existing.video = asset if choice['kind'] == 'VIDEO' else None
+            existing.image = asset if choice['kind'] == 'IMAGE' else None
+            existing.audio = None
+            existing.video_finale = None
+            existing.statut = SceneMedia.Status.DRAFT
+            existing.full_clean()
+            existing.save()
         for n in removed:n.delete()
-        validate_story_graph(story)
+        validate_story_graph(story, require_complete=False)
         story.statut_editorial=StatutEditorial.BROUILLON
         story.save(update_fields=['statut_editorial','updated_at'])
     return len(objects)

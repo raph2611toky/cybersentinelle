@@ -88,3 +88,22 @@ voice_delete_doc = swagger_auto_schema(operation_summary='Supprimer un profil vo
     openapi.Schema(type=openapi.TYPE_OBJECT, properties={'deleted': openapi.Schema(type=openapi.TYPE_BOOLEAN)})))
 scene_delete_doc = swagger_auto_schema(operation_summary='Supprimer le montage d’une scène', tags=['Studio / Scènes'], responses=responses(
     openapi.Schema(type=openapi.TYPE_OBJECT, properties={'deleted': openapi.Schema(type=openapi.TYPE_BOOLEAN)})))
+
+
+voice_catalog_doc = swagger_auto_schema(
+    operation_summary='Voix réellement proposées par Google Cloud ou ElevenLabs au compte configuré',
+    tags=['Studio / Voix'],
+    manual_parameters=[
+        openapi.Parameter('provider', openapi.IN_QUERY, type=openapi.TYPE_STRING, required=True,
+                          enum=['ELEVENLABS', 'GOOGLE_CLOUD']),
+        openapi.Parameter('language', openapi.IN_QUERY, type=openapi.TYPE_STRING, required=True, enum=['fr', 'mg']),
+    ],
+    responses=responses(openapi.Schema(type=openapi.TYPE_OBJECT, required=['results','provider','language'], properties={
+        'results': openapi.Schema(type=openapi.TYPE_ARRAY, items=openapi.Schema(type=openapi.TYPE_OBJECT, properties={
+            'name': openapi.Schema(type=openapi.TYPE_STRING), 'voice_id': openapi.Schema(type=openapi.TYPE_STRING),
+            'model_id': openapi.Schema(type=openapi.TYPE_STRING), 'provider': openapi.Schema(type=openapi.TYPE_STRING),
+        })),
+        'provider': openapi.Schema(type=openapi.TYPE_STRING),
+        'language': openapi.Schema(type=openapi.TYPE_STRING),
+    })),
+)

@@ -44,6 +44,7 @@ export const studioApi = {
   updateMedia: (id, data) => api.patch(`${studio}/media/${id}/update/`, data),
   file: id => api.get(`${studio}/media/${id}/file/`, { responseType: 'blob', timeout: 120000 }),
   voices: () => allPages(`${studio}/voices/`),
+  voiceCatalog: (provider, language) => api.get(`${studio}/voices/catalog/`, {params:{provider, language}, timeout:30000}),
   createVoice: data => api.post(`${studio}/voices/create/`, data),
   scenes: () => allPages(`${studio}/scenes/`),
   createScene: data => api.post(`${studio}/scenes/create/`, data),
