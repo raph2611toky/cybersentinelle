@@ -30,4 +30,19 @@ assert.equal(published.embeddedAudio,false);
 assert.equal(adminMediaUrl('javascript:alert(1)'),'');
 assert.equal(adminMediaUrl('https://malicious.example/invalid'),'');
 assert.equal(adminMediaUrl('https://internal:8000/api/editor/studio/media/asset/file/'),base+'asset/file/');
-console.log('16 contrôles sources FR/MG réussis.');
+const frWithVariants = {
+  ...fr,
+  audio_variants: [
+    {id:'old',titre:'Ancienne narration',audio_url:base+'old/file/',audio:'old-file',selected:false},
+    {id:'new',titre:'Nouvelle narration',audio_url:base+'new/file/',audio:'new-file',selected:true},
+  ],
+};
+const alternative = draftSceneSources({scenes:[frWithVariants],languages,media:[],nodeId:'start',lang:'fr',variantId:'old'});
+assert.equal(alternative.audio,base+'old/file/');
+assert.equal(alternative.video,base+'original/file/');
+assert.equal(alternative.embeddedAudio,false);
+const noFrench = {...fr,statut:'DRAFT',audio:null,audio_finale_url:null,video_finale_url:null};
+const emptyTrack=draftSceneSources({scenes:[noFrench],languages,media:[],nodeId:'start',lang:'fr'});
+assert.equal(emptyTrack.audio,'');
+assert.equal(emptyTrack.audioLanguage,null);
+console.log('21 contrôles sources FR/MG, variantes et absence de piste réussis.');

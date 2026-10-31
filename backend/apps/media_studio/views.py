@@ -15,14 +15,15 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 from apps.core.models import Langue
 from helpers.api.responses import error, failed
-from .models import MediaAsset, VoiceProfile, SceneMedia, GenerationJob, DialogueLine
+from .models import MediaAsset, VoiceProfile, SceneMedia, GenerationJob, DialogueLine, SceneAudioVariant
 from .permissions import StudioPermissions
 from .serializers import (MediaAssetSerializer, MediaUploadInput, MediaMetadataInput, VoiceSerializer,
-    SceneSerializer, DialogueSerializer, JobSerializer, TTSInput)
+    SceneSerializer, AudioVariantSerializer, DialogueSerializer, JobSerializer, TTSInput)
 from .services.media import persist_upload
 from .providers.tts import list_provider_voices, ProviderError
 from .tasks import process_studio_job
 from .auto_audio import dispatch
+from .variants import sync_selected_file, select_variant
 from . import swagger as docs
 
 LOG = logging.getLogger('safidiko')
@@ -301,6 +302,8 @@ class SceneCreateAPIView(APIView):
             s = SceneSerializer(data=request.data, context={'request': request})
             s.is_valid(raise_exception=True)
             obj = s.save()
+            if obj.audio_id:
+                sync_selected_file(obj)
             return Response(SceneSerializer(obj, context={'request': request}).data, status=201)
         except (serializers.ValidationError, DjangoValidationError) as exc:
             return invalid(exc)
@@ -324,6 +327,9 @@ class ScenePatchAPIView(APIView):
             s = SceneSerializer(obj, data=request.data, partial=True, context={'request': request})
             s.is_valid(raise_exception=True)
             obj = s.save(video_finale=None, audio_finale=None, statut=SceneMedia.Status.DRAFT)
+            # Même si seul le mode de synchronisation change, la variante active
+            # doit conserver le même réglage.
+            sync_selected_file(obj)
             return Response(SceneSerializer(obj, context={'request': request}).data)
         except (serializers.ValidationError, DjangoValidationError) as exc:
             return invalid(exc)
@@ -344,7 +350,7 @@ class VoiceCatalogAPIView(APIView):
         try:
             provider = request.query_params.get('provider', 'GOOGLE_CLOUD').upper()
             language = request.query_params.get('language', 'fr').lower()
-            if provider not in {'ELEVENLABS', 'GOOGLE_CLOUD'} or language not in {'fr', 'mg'}:
+            if provider not in {'GTTS', 'ELEVENLABS', 'GOOGLE_CLOUD'} or language not in {'fr', 'mg'}:
                 return error(400, 'BAD_REQUEST', 'Fournisseur ou langue non pris en charge')
             return Response({'provider': provider, 'language': language,
                              'results': list_provider_voices(provider, language)})
@@ -362,6 +368,12 @@ class VoiceListAPIView(APIView):
     @docs.voice_list_doc
     def get(self, request):
         try:
+            # Sur une installation neuve, les langues peuvent être créées par seed_defaults
+            # après les migrations. Ce bootstrap privé est idempotent.
+            from .defaults import default_french_voice
+            default_lang = Langue.objects.filter(code='fr', actif=True).first()
+            if default_lang:
+                default_french_voice(default_lang)
             return Response({'results': VoiceSerializer(VoiceProfile.objects.select_related('langue').all()[:200], many=True).data})
         except Exception as exc:
             return failed(exc)
@@ -400,7 +412,13 @@ class TTSCreateAPIView(APIView):
             today = timezone.localdate()
             if GenerationJob.objects.filter(type='TTS', created_at__date=today).count() >= settings.STUDIO_TTS_DAILY_LIMIT:
                 return error(429, 'TTS_DAILY_LIMIT', 'Limite quotidienne de synthèse vocale atteinte')
-            job = GenerationJob.objects.create(type='TTS', scene=d['scene'], voix=d['voix'], texte=d['texte'])
+            variant = SceneAudioVariant.objects.create(
+                scene=d['scene'], titre=(d.get('titre') or f'Voix {d["voix"].nom}')[:160],
+                origine=SceneAudioVariant.Origin.TTS, voix=d['voix'], texte=d['texte'],
+                activate_on_ready=d['activer'], sync_mode=d.get('sync_mode', d['scene'].sync_mode),
+                audio_trim_start_ms=d.get('audio_trim_start_ms', 0),
+                audio_trim_end_ms=d.get('audio_trim_end_ms'))
+            job = GenerationJob.objects.create(type='TTS', scene=d['scene'], voix=d['voix'], texte=d['texte'], variante=variant)
             transaction.on_commit(lambda: dispatch(job.pk))
             return Response(JobSerializer(job, context={'request': request}).data, status=202)
         except StudioQueueUnavailable:
@@ -689,4 +707,64 @@ class PrepareStoryAudioAPIView(APIView):
         except Exception as exc:
             if isinstance(exc, Http404):
                 return error(404, 'NOT_FOUND', 'Tantara introuvable')
+            return failed(exc)
+
+
+class SceneVariantListAPIView(APIView):
+    permission_classes = [StudioPermissions]
+    required_permission = 'media_studio.view_scenemedia'
+
+    @docs.variant_list_doc
+    def get(self, request, pk):
+        try:
+            scene = get_object_or_404(SceneMedia, pk=pk)
+            qs = scene.variants.select_related('voix','audio').prefetch_related('jobs').all()
+            return Response({'results': AudioVariantSerializer(qs, many=True, context={'request': request}).data})
+        except Exception as exc:
+            if isinstance(exc, Http404):
+                return error(404, 'NOT_FOUND', 'Scène introuvable')
+            return failed(exc)
+
+
+class SceneVariantSelectAPIView(APIView):
+    permission_classes = [StudioPermissions]
+    required_permission = 'media_studio.change_scenemedia'
+
+    @docs.variant_select_doc
+    @transaction.atomic
+    def post(self, request, pk, variant_id):
+        try:
+            scene = get_object_or_404(SceneMedia.objects.select_for_update(), pk=pk)
+            if scene.jobs.filter(statut__in=['PENDING', 'RUNNING']).exists():
+                return conflict()
+            variant = get_object_or_404(SceneAudioVariant, pk=variant_id, scene=scene)
+            if not variant.audio_id:
+                return error(400, 'BAD_REQUEST', 'Cette piste est encore en cours de génération ou en échec')
+            select_variant(scene, variant)
+            # Sélectionner = changer la source; le rendu FFmpeg se lance explicitement ensuite.
+            return Response(SceneSerializer(scene, context={'request': request}).data)
+        except (serializers.ValidationError, DjangoValidationError, ValueError) as exc:
+            return invalid(exc)
+        except Exception as exc:
+            if isinstance(exc, Http404):
+                return error(404, 'NOT_FOUND', 'Scène ou piste introuvable')
+            return failed(exc)
+
+
+class SceneVariantClearAPIView(APIView):
+    permission_classes = [StudioPermissions]
+    required_permission = 'media_studio.change_scenemedia'
+
+    @docs.variant_clear_doc
+    @transaction.atomic
+    def post(self, request, pk):
+        try:
+            scene = get_object_or_404(SceneMedia.objects.select_for_update(), pk=pk)
+            if scene.jobs.filter(statut__in=['PENDING', 'RUNNING']).exists():
+                return conflict()
+            select_variant(scene, None)
+            return Response(SceneSerializer(scene, context={'request': request}).data)
+        except Exception as exc:
+            if isinstance(exc, Http404):
+                return error(404, 'NOT_FOUND', 'Scène introuvable')
             return failed(exc)

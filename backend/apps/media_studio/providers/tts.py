@@ -1,5 +1,6 @@
 """Adaptateurs TTS. Ne jamais logger les textes, clés ou réponses externes."""
 import base64
+import io
 import json
 import os
 import re
@@ -45,6 +46,24 @@ def synthesize(profile, text):
     # Toute valeur de modèle/voix est validée car elle est stockée en BDD et sert à l'appel API.
     if not re.fullmatch(r'[A-Za-z0-9_.-]{2,120}', profile.model_id) or not re.fullmatch(r'[A-Za-z0-9_.-]{2,120}', profile.voice_id):
         raise ProviderError('TTS_CONFIGURATION_INVALID')
+    if provider == 'GTTS':
+        if profile.langue.code != 'fr' or profile.model_id != 'gtts-fr' or profile.voice_id != 'fr':
+            raise ProviderError('TTS_CONFIGURATION_INVALID')
+        try:
+            from gtts import gTTS
+            from gtts.tts import gTTSError
+        except ImportError:
+            raise ProviderError('TTS_GTTS_NOT_INSTALLED') from None
+        try:
+            buffer = io.BytesIO()
+            gTTS(text=text, lang='fr', lang_check=False,
+                 timeout=settings.STUDIO_PROVIDER_TIMEOUT).write_to_fp(buffer)
+            data = buffer.getvalue()
+            if not data or len(data) > settings.STUDIO_MAX_TTS_RESULT_BYTES:
+                raise ProviderError('TTS_BAD_AUDIO')
+            return data, '.mp3', 'audio/mpeg'
+        except (gTTSError, OSError, TimeoutError, ValueError):
+            raise ProviderError('TTS_GTTS_UNAVAILABLE') from None
     if provider == 'ELEVENLABS':
         key = os.getenv('ELEVENLABS_API_KEY', '').strip()
         if not key:
@@ -119,10 +138,14 @@ def synthesize(profile, text):
 
 def list_provider_voices(provider, language):
     """Returns only voices exposed to this authenticated account; no fake/unlimited voices."""
-    if provider not in {'ELEVENLABS', 'GOOGLE_CLOUD'} or language not in {'fr', 'mg'}:
+    if provider not in {'ELEVENLABS', 'GOOGLE_CLOUD', 'GTTS'} or language not in {'fr', 'mg'}:
         raise ProviderError('TTS_CONFIGURATION_INVALID')
     if provider not in settings.STUDIO_TTS_PROVIDERS:
         raise ProviderError('TTS_PROVIDER_DISABLED')
+    if provider == 'GTTS':
+        return ([{'name': 'gTTS français (par défaut)', 'voice_id': 'fr', 'model_id': 'gtts-fr',
+                  'provider': 'GTTS', 'note': 'Service Google Traduction non officiel, disponibilité variable'}]
+                if language == 'fr' else [])
     if provider == 'ELEVENLABS':
         key = os.getenv('ELEVENLABS_API_KEY', '').strip()
         if not key:

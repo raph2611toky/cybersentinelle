@@ -16,3 +16,6 @@ redis>=5,<7
 
 # Authenticated Google Cloud Translation API client (FR -> MG).
 google-cloud-translate>=3.15,<4
+
+# gTTS (Google Translate unofficial endpoint, no Google Cloud billing key)
+gTTS>=2.5.4,<3.0

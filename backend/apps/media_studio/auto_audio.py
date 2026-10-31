@@ -3,7 +3,8 @@ import logging
 from django.conf import settings
 from django.db import transaction
 from django.utils import timezone
-from .models import SceneMedia, VoiceProfile, GenerationJob
+from .models import SceneMedia, VoiceProfile, GenerationJob, SceneAudioVariant
+from .defaults import default_french_voice
 
 LOG = logging.getLogger('safidiko')
 
@@ -27,7 +28,12 @@ def prepare_audio(scene_id):
         text = scene.narration_texte.strip() or (scene.noeud.texte_fr.strip() if code == 'fr' else '')
         if not text:
             return 'NARRATION_TEXT_MISSING'
-        voice = scene.voix or VoiceProfile.objects.filter(langue=scene.langue, actif=True).order_by('created_at').first()
+        # Bulk retry is intentionally free-first for FR, even if a failed historic
+        # ElevenLabs profile remains linked. Explicit TTS generation still honors
+        # the profile selected in the Studio Django form.
+        voice = (default_french_voice(scene.langue) if code == 'fr' else None) or (
+            scene.voix if scene.voix and scene.voix.actif else None) or (
+            VoiceProfile.objects.filter(langue=scene.langue, actif=True).order_by('created_at').first())
         if not voice or not voice.actif or voice.langue_id != scene.langue_id:
             return 'TTS_VOICE_MISSING'
         if len(text) > settings.STUDIO_MAX_TTS_CHARS:
@@ -39,7 +45,11 @@ def prepare_audio(scene_id):
         mode = 'VIDEO_AUDIO' if scene.video_id else 'IMAGE_AUDIO' if scene.image_id else 'AUDIO_ONLY'
         SceneMedia.objects.filter(pk=scene.pk).update(mode=mode, voix=voice, narration_texte=text,
             video_finale=None, audio_finale=None, statut='DRAFT', updated_at=timezone.now())
-        job = GenerationJob.objects.create(type='TTS', scene=scene, voix=voice, texte=text)
+        variant = SceneAudioVariant.objects.create(scene=scene, titre=f'Auto {scene.noeud.cle} (FR)',
+            origine=SceneAudioVariant.Origin.TTS, voix=voice, texte=text, selected=False, activate_on_ready=True,
+            sync_mode=scene.sync_mode, audio_trim_start_ms=scene.audio_trim_start_ms,
+            audio_trim_end_ms=scene.audio_trim_end_ms)
+        job = GenerationJob.objects.create(type='TTS', scene=scene, voix=voice, texte=text, variante=variant)
         transaction.on_commit(lambda: dispatch(job.pk))
         return None
 

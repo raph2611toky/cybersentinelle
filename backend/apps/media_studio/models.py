@@ -65,6 +65,7 @@ class MediaAsset(ModeleBase):
 
 class VoiceProfile(ModeleBase):
     class Provider(models.TextChoices):
+        GTTS = 'GTTS', 'gTTS (Google Traduction, français)'
         GEMINI = 'GEMINI', 'Gemini Developer API'
         ELEVENLABS = 'ELEVENLABS', 'ElevenLabs'
         GOOGLE_CLOUD = 'GOOGLE_CLOUD', 'Google Cloud Text-to-Speech'
@@ -185,6 +186,40 @@ class DialogueLine(ModeleBase):
             raise ValidationError({'audio': 'Un fichier audio est nécessaire.'})
 
 
+class SceneAudioVariant(ModeleBase):
+    """Pistes alternatives privées d'une même scène, sans écraser la piste active."""
+    class Origin(models.TextChoices):
+        TTS = 'TTS', 'Synthèse vocale'
+        FILE = 'FILE', 'Fichier audio'
+        LEGACY = 'LEGACY', 'Piste préexistante'
+
+    scene = models.ForeignKey(SceneMedia, on_delete=models.CASCADE, related_name='variants')
+    titre = models.CharField(max_length=160)
+    origine = models.CharField(max_length=10, choices=Origin.choices, default=Origin.FILE)
+    audio = models.ForeignKey(MediaAsset, null=True, blank=True, on_delete=models.PROTECT, related_name='scene_variants')
+    voix = models.ForeignKey(VoiceProfile, null=True, blank=True, on_delete=models.PROTECT, related_name='audio_variants')
+    texte = models.TextField(blank=True)
+    selected = models.BooleanField(default=False)
+    activate_on_ready = models.BooleanField(default=True)
+    sync_mode = models.CharField(max_length=12, choices=SceneMedia.SyncMode.choices, default=SceneMedia.SyncMode.FREEZE_LAST)
+    audio_trim_start_ms = models.PositiveIntegerField(default=0)
+    audio_trim_end_ms = models.PositiveIntegerField(null=True, blank=True)
+
+    class Meta:
+        db_table = 'media_studio_variant'
+        ordering = ['-created_at']
+        indexes = [models.Index(fields=['scene', 'created_at'], name='studio_variant_scene_idx')]
+
+    def clean(self):
+        super().clean()
+        if self.audio_id and self.audio.type != MediaAsset.Kind.AUDIO:
+            raise ValidationError({'audio': 'Ce fichier doit être audio.'})
+        if self.voix_id and self.scene_id and self.voix.langue_id != self.scene.langue_id:
+            raise ValidationError({'voix': 'La voix doit correspondre à la langue de la scène.'})
+        if self.audio_trim_end_ms is not None and self.audio_trim_end_ms <= self.audio_trim_start_ms:
+            raise ValidationError({'audio_trim_end_ms': 'La fin doit être après le début.'})
+
+
 class GenerationJob(ModeleBase):
     class Type(models.TextChoices):
         TTS = 'TTS', 'Synthèse vocale'
@@ -199,6 +234,7 @@ class GenerationJob(ModeleBase):
     type = models.CharField(max_length=8, choices=Type.choices)
     statut = models.CharField(max_length=8, choices=Status.choices, default=Status.PENDING)
     scene = models.ForeignKey(SceneMedia, on_delete=models.CASCADE, related_name='jobs')
+    variante = models.ForeignKey(SceneAudioVariant, on_delete=models.SET_NULL, null=True, blank=True, related_name='jobs')
     dialogue = models.ForeignKey(DialogueLine, on_delete=models.CASCADE, null=True, blank=True, related_name='jobs')
     voix = models.ForeignKey(VoiceProfile, on_delete=models.PROTECT, null=True, blank=True)
     texte = models.TextField(blank=True)

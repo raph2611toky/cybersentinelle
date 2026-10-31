@@ -1,5 +1,5 @@
 from django.contrib import admin
-from .models import MediaAsset, VoiceProfile, SceneMedia, DialogueLine, GenerationJob
+from .models import MediaAsset, VoiceProfile, SceneMedia, DialogueLine, GenerationJob, SceneAudioVariant
 
 
 @admin.register(MediaAsset)
@@ -46,3 +46,10 @@ class GenerationJobAdmin(admin.ModelAdmin):
         return False
     def has_change_permission(self, request, obj=None):
         return False
+
+
+@admin.register(SceneAudioVariant)
+class SceneAudioVariantAdmin(admin.ModelAdmin):
+    list_display = ('titre','scene','origine','selected','created_at')
+    list_filter = ('origine','selected')
+    readonly_fields = ('id','created_at','updated_at')

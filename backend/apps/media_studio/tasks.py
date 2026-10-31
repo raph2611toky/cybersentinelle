@@ -5,7 +5,7 @@ from django.core.files.base import ContentFile
 from django.db import transaction
 from django.utils import timezone
 from celery import shared_task
-from .models import GenerationJob, MediaAsset, SceneMedia
+from .models import GenerationJob, MediaAsset, SceneMedia, SceneAudioVariant
 from .providers.tts import synthesize, ProviderError
 from .services.media import persist_generated, persist_upload
 from .services.video import render_scene, render_audio_only, extract_narration, RenderError
@@ -38,16 +38,25 @@ def process_studio_job(job_id):
                 dialogue = job.dialogue
                 dialogue.audio = asset
                 dialogue.save(update_fields=['audio', 'updated_at'])
+            elif job.variante_id:
+                with transaction.atomic():
+                    variant = SceneAudioVariant.objects.select_for_update().get(pk=job.variante_id)
+                    variant.audio = asset
+                    variant.save(update_fields=['audio','updated_at'])
+                    if variant.activate_on_ready:
+                        from .variants import select_variant
+                        scene = SceneMedia.objects.select_for_update().get(pk=scene.pk)
+                        select_variant(scene, variant)
+                        auto_render_after_tts = True
             else:
+                # Historic TTS jobs (before variants migration) still work.
                 scene.audio = asset
                 scene.statut = SceneMedia.Status.DRAFT
                 scene.save(update_fields=['audio', 'statut', 'updated_at'])
-                # Après une synthèse explicite, préparer un rendu FFmpeg automatiquement si visuel présent.
-                # Le rendu utilise l'audio existant (pas un second appel TTS payant).
-                if scene.mode in {SceneMedia.Mode.IMAGE_AUDIO, SceneMedia.Mode.VIDEO_AUDIO, SceneMedia.Mode.AUDIO_ONLY}:
-                    auto_render_after_tts = True
-                else:
-                    auto_render_after_tts = False
+                from .variants import sync_selected_file
+                sync_selected_file(scene)
+                auto_render_after_tts = scene.mode in {
+                    SceneMedia.Mode.IMAGE_AUDIO, SceneMedia.Mode.VIDEO_AUDIO, SceneMedia.Mode.AUDIO_ONLY}
         elif job.type == GenerationJob.Type.RENDER:
             audio_only = scene.mode == SceneMedia.Mode.AUDIO_ONLY
             payload = render_audio_only(scene) if audio_only else render_scene(scene)

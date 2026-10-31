@@ -2,7 +2,7 @@
 from drf_yasg import openapi
 from drf_yasg.utils import swagger_auto_schema
 from .serializers import (MediaAssetSerializer, SceneSerializer, VoiceSerializer, JobSerializer, DialogueSerializer,
-    MediaListResponseSerializer, SceneListResponseSerializer,
+    MediaListResponseSerializer, SceneListResponseSerializer, AudioVariantListResponseSerializer,
     MediaMetadataInput, VoiceListResponseSerializer,
     JobListResponseSerializer, DialogueListResponseSerializer)
 
@@ -55,9 +55,14 @@ scene_detail_doc = swagger_auto_schema(operation_summary='Consulter le montage d
 scene_create_doc = swagger_auto_schema(operation_summary='Créer le montage d’une scène ou d’une fin', tags=['Studio / Scènes'], request_body=SceneSerializer, responses=responses(obj(SceneSerializer), 201))
 scene_patch_doc = swagger_auto_schema(operation_summary='Modifier le montage d’une scène ou d’une fin', tags=['Studio / Scènes'], request_body=SceneSerializer, responses=responses(obj(SceneSerializer)))
 voice_list_doc = swagger_auto_schema(operation_summary='Lister les profils vocaux', tags=['Studio / Voix'], responses=responses(VoiceListResponseSerializer()))
-voice_create_doc = swagger_auto_schema(operation_summary='Enregistrer une voix Gemini / ElevenLabs', tags=['Studio / Voix'], request_body=VoiceSerializer, responses=responses(obj(VoiceSerializer), 201))
+voice_create_doc = swagger_auto_schema(operation_summary='Enregistrer une voix gTTS / Gemini / ElevenLabs / Google Cloud', tags=['Studio / Voix'], request_body=VoiceSerializer, responses=responses(obj(VoiceSerializer), 201))
 tts_doc = swagger_auto_schema(operation_summary='Mettre en file une génération TTS FR/MG', tags=['Studio / Voix'],
   request_body=openapi.Schema(type=openapi.TYPE_OBJECT, required=['scene','voix','texte'], properties={
+    'activer':openapi.Schema(type=openapi.TYPE_BOOLEAN, description='Sélectionner automatiquement cette variante après génération'),
+    'titre':openapi.Schema(type=openapi.TYPE_STRING),
+    'sync_mode':openapi.Schema(type=openapi.TYPE_STRING, enum=['FREEZE_LAST','SPEED','TRIM','TRIM_SPEED']),
+    'audio_trim_start_ms':openapi.Schema(type=openapi.TYPE_INTEGER),
+    'audio_trim_end_ms':openapi.Schema(type=openapi.TYPE_INTEGER, x_nullable=True),
     'scene': openapi.Schema(type=openapi.TYPE_STRING, format='uuid'),
     'voix': openapi.Schema(type=openapi.TYPE_STRING, format='uuid'),
     'texte': openapi.Schema(type=openapi.TYPE_STRING)}), responses=responses(obj(JobSerializer), 202))
@@ -95,7 +100,7 @@ voice_catalog_doc = swagger_auto_schema(
     tags=['Studio / Voix'],
     manual_parameters=[
         openapi.Parameter('provider', openapi.IN_QUERY, type=openapi.TYPE_STRING, required=True,
-                          enum=['ELEVENLABS', 'GOOGLE_CLOUD']),
+                          enum=['GTTS', 'ELEVENLABS', 'GOOGLE_CLOUD']),
         openapi.Parameter('language', openapi.IN_QUERY, type=openapi.TYPE_STRING, required=True, enum=['fr', 'mg']),
     ],
     responses=responses(openapi.Schema(type=openapi.TYPE_OBJECT, required=['results','provider','language'], properties={
@@ -117,3 +122,13 @@ prepare_story_audio_doc = swagger_auto_schema(
                 'node': openapi.Schema(type=openapi.TYPE_STRING, format='uuid'),
                 'error': openapi.Schema(type=openapi.TYPE_STRING, x_nullable=True),
             }))}), 202))
+
+
+variant_list_doc = swagger_auto_schema(operation_summary='Lister les différentes narrations d’une scène',
+    tags=['Studio / Variantes FR-MG'], responses=responses(AudioVariantListResponseSerializer()))
+variant_select_doc = swagger_auto_schema(operation_summary='Sélectionner une piste audio existante sans supprimer les autres',
+    tags=['Studio / Variantes FR-MG'], request_body=openapi.Schema(type=openapi.TYPE_OBJECT),
+    responses=responses(obj(SceneSerializer)))
+variant_clear_doc = swagger_auto_schema(operation_summary='Désélectionner toutes les pistes (brouillon non publiable)',
+    tags=['Studio / Variantes FR-MG'], request_body=openapi.Schema(type=openapi.TYPE_OBJECT),
+    responses=responses(obj(SceneSerializer)))

@@ -709,3 +709,16 @@ option {background:#141419;color:#f0f0f5;}
 .publish-help-links a {font-weight:600;color:#a7c9ff;text-decoration:underline;}
 .publish-check-heading {display:flex;align-items:center;justify-content:space-between;gap:12px;}
 .publish-check-heading button {padding:6px 10px;min-width:auto;}
+
+/* Pistes multiples du studio vocal : sélecteur compact sous le statut FR. */
+.voice-variant-picker {display:grid; gap:4px; min-width:160px; font-size:11px; color:var(--text-secondary,#a1adc5);}
+.voice-variant-picker select {width:100%;min-width:0;max-width:245px;padding:7px 9px;font-size:12px;background:#111421;color:#e9efff;border:1px solid #343c59;}
+.voice-activate-choice {display:flex;align-items:center;gap:10px;font-size:12px;color:#b8c6df;}
+.voice-activate-choice input {width:16px;height:16px;accent-color:#8b5cf6;}
+.studio-preview-heading label select {max-width:240px;}
+@media(max-width:960px){.voice-variant-picker select{max-width:100%;}}
+
+.story-node-row .story-node-language-multi {display:grid;grid-template-columns:minmax(0,1fr);gap:7px;align-items:start;justify-items:stretch;}
+.story-node-row .story-node-language-multi .voice-variant-picker {min-width:0;width:100%;}
+.story-node-row .story-node-language-multi .voice-variant-picker select {width:100%;max-width:100%;}
+.story-node-row .story-node-language-multi .btn {width:100%;}

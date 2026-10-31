@@ -229,7 +229,9 @@ STUDIO_MAX_OUTPUT_BYTES = 150 * 1024 * 1024
 STUDIO_MAX_TTS_RESULT_BYTES = 20 * 1024 * 1024
 STUDIO_MAX_TTS_CHARS = min(int(os.getenv('STUDIO_MAX_TTS_CHARS', '1200')), 2500)
 STUDIO_TTS_DAILY_LIMIT = min(int(os.getenv('STUDIO_TTS_DAILY_LIMIT', '12')), 100)
-STUDIO_TTS_PROVIDERS = {x.strip().upper() for x in os.getenv('STUDIO_TTS_PROVIDERS', 'GEMINI,ELEVENLABS,GOOGLE_CLOUD').split(',') if x.strip()}
+STUDIO_TTS_PROVIDERS = {x.strip().upper() for x in os.getenv('STUDIO_TTS_PROVIDERS', 'GTTS,GEMINI,ELEVENLABS,GOOGLE_CLOUD').split(',') if x.strip()}
+# gTTS français fonctionne sans clé API : il reste disponible même avec un ancien backend.env.
+STUDIO_TTS_PROVIDERS.add('GTTS')
 STUDIO_PROVIDER_TIMEOUT = 65
 STUDIO_RENDER_TIMEOUT = 180
 

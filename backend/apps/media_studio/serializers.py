@@ -3,7 +3,7 @@ from django.urls import reverse
 from rest_framework import serializers
 from drf_yasg.utils import swagger_serializer_method
 from apps.core.serializers import ValidatedModelSerializer
-from .models import MediaAsset, VoiceProfile, SceneMedia, DialogueLine, GenerationJob
+from .models import MediaAsset, VoiceProfile, SceneMedia, SceneAudioVariant, DialogueLine, GenerationJob
 
 
 class MediaAssetSerializer(serializers.ModelSerializer):
@@ -23,10 +23,47 @@ class MediaAssetSerializer(serializers.ModelSerializer):
 
 
 class VoiceSerializer(ValidatedModelSerializer):
+    def validate(self, attrs):
+        language = attrs.get('langue', getattr(self.instance, 'langue', None))
+        provider = attrs.get('provider', getattr(self.instance, 'provider', None))
+        model_id = attrs.get('model_id', getattr(self.instance, 'model_id', None))
+        voice_id = attrs.get('voice_id', getattr(self.instance, 'voice_id', None))
+        if provider == 'GTTS' and (not language or language.code != 'fr' or model_id != 'gtts-fr' or voice_id != 'fr'):
+            raise serializers.ValidationError({'provider': 'gTTS utilise uniquement français, model_id=gtts-fr, voice_id=fr.'})
+        return super().validate(attrs)
+
     class Meta:
         model = VoiceProfile
         fields = ('id', 'nom', 'langue', 'provider', 'model_id', 'voice_id', 'style', 'actif', 'created_at', 'updated_at')
         read_only_fields = ('id', 'created_at', 'updated_at')
+
+
+class AudioVariantSerializer(serializers.ModelSerializer):
+    audio_url = serializers.SerializerMethodField()
+    job_status = serializers.SerializerMethodField()
+    job_error = serializers.SerializerMethodField()
+    voice_provider = serializers.CharField(source='voix.provider', read_only=True, default='')
+    class Meta:
+        model = SceneAudioVariant
+        fields = ('id','scene','titre','origine','audio','audio_url','voix','voice_provider','texte',
+                  'selected','activate_on_ready','sync_mode','audio_trim_start_ms','audio_trim_end_ms',
+                  'job_status','job_error','created_at')
+        read_only_fields = fields
+
+    def get_audio_url(self, obj):
+        if not obj.audio_id:
+            return None
+        path = reverse('studio-media-download', kwargs={'pk': obj.audio_id})
+        request = self.context.get('request')
+        return request.build_absolute_uri(path) if request else path
+
+    def get_job_status(self, obj):
+        job = next(iter(obj.jobs.all()), None)
+        return job.statut if job else ('SUCCESS' if obj.audio_id else 'PENDING')
+
+    def get_job_error(self, obj):
+        job = next(iter(obj.jobs.all()), None)
+        return job.code_erreur if job else ''
 
 
 class SceneSerializer(ValidatedModelSerializer):
@@ -37,14 +74,15 @@ class SceneSerializer(ValidatedModelSerializer):
     image_source_url = serializers.SerializerMethodField()
     audio_embedded = serializers.SerializerMethodField()
     audio_tracks = serializers.SerializerMethodField()
+    audio_variants = AudioVariantSerializer(source='variants', many=True, read_only=True)
 
     class Meta:
         model = SceneMedia
         fields = ('id', 'noeud', 'langue', 'mode', 'image', 'video', 'audio', 'sous_titres',
                   'video_finale', 'video_finale_url', 'audio_finale', 'audio_finale_url',
-                  'video_source_url', 'image_source_url', 'audio_source_url', 'audio_embedded', 'audio_tracks',
+                  'video_source_url', 'image_source_url', 'audio_source_url', 'audio_embedded', 'audio_tracks', 'audio_variants',
                   'sync_mode', 'audio_trim_start_ms', 'audio_trim_end_ms', 'narration_texte', 'voix', 'statut', 'created_at', 'updated_at')
-        read_only_fields = ('id', 'video_finale', 'video_finale_url', 'audio_finale', 'audio_finale_url', 'video_source_url', 'image_source_url', 'audio_source_url', 'audio_embedded', 'audio_tracks', 'statut', 'created_at', 'updated_at')
+        read_only_fields = ('id', 'video_finale', 'video_finale_url', 'audio_finale', 'audio_finale_url', 'video_source_url', 'image_source_url', 'audio_source_url', 'audio_embedded', 'audio_tracks', 'audio_variants', 'statut', 'created_at', 'updated_at')
 
     @swagger_serializer_method(serializer_or_field=serializers.JSONField())
     def get_audio_tracks(self, obj):
@@ -122,7 +160,7 @@ class JobSerializer(serializers.ModelSerializer):
     resultat_url = serializers.SerializerMethodField()
     class Meta:
         model = GenerationJob
-        fields = ('id', 'type', 'statut', 'scene', 'dialogue', 'voix', 'resultat', 'resultat_url', 'code_erreur', 'debut_le', 'fin_le', 'created_at')
+        fields = ('id', 'type', 'statut', 'scene', 'dialogue', 'variante', 'voix', 'resultat', 'resultat_url', 'code_erreur', 'debut_le', 'fin_le', 'created_at')
         read_only_fields = fields
 
     def get_resultat_url(self, obj):
@@ -150,6 +188,11 @@ class MediaMetadataInput(serializers.Serializer):
 
 
 class TTSInput(serializers.Serializer):
+    activer = serializers.BooleanField(default=True, required=False)
+    titre = serializers.CharField(max_length=160, required=False, allow_blank=True)
+    sync_mode = serializers.ChoiceField(choices=SceneMedia.SyncMode.choices, required=False)
+    audio_trim_start_ms = serializers.IntegerField(min_value=0, required=False, default=0)
+    audio_trim_end_ms = serializers.IntegerField(min_value=1, required=False, allow_null=True, default=None)
     scene = serializers.PrimaryKeyRelatedField(queryset=SceneMedia.objects.all())
     voix = serializers.PrimaryKeyRelatedField(queryset=VoiceProfile.objects.filter(actif=True))
     texte = serializers.CharField(max_length=2500, trim_whitespace=True, allow_blank=False)
@@ -160,6 +203,8 @@ class TTSInput(serializers.Serializer):
             raise serializers.ValidationError({'voix': 'Langue différente de celle de la scène.'})
         if len(attrs['texte']) > settings.STUDIO_MAX_TTS_CHARS:
             raise serializers.ValidationError({'texte': 'Texte trop long.'})
+        if attrs['audio_trim_end_ms'] is not None and attrs['audio_trim_end_ms'] <= attrs['audio_trim_start_ms']:
+            raise serializers.ValidationError({'audio_trim_end_ms': 'La fin doit être après le début.'})
         if attrs['scene'].jobs.filter(statut__in=['PENDING', 'RUNNING']).exists():
             raise serializers.ValidationError({'scene': 'Un traitement est déjà en cours.'})
         return attrs
@@ -188,3 +233,7 @@ class JobListResponseSerializer(serializers.Serializer):
 
 class DialogueListResponseSerializer(serializers.Serializer):
     results = DialogueSerializer(many=True)
+
+
+class AudioVariantListResponseSerializer(serializers.Serializer):
+    results = AudioVariantSerializer(many=True)

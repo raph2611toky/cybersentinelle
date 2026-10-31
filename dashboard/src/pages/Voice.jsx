@@ -14,6 +14,8 @@ export default function Voice() {
   const [activeStudioTab,setActiveStudioTab]=useState('scenes');
   const [expanded,setExpanded]=useState({browser:false, django:false});
   const [previewLang,setPreviewLang]=useState('fr');
+  const [previewVariantId,setPreviewVariantId]=useState('active');
+  const [synthActivate,setSynthActivate]=useState(true);
   const activeStoryId=storyId || stories[0]?.id || '';
   const [trackOnly,setTrackOnly]=useState(false);
   const [quickTrack,setQuickTrack] = useState(null);
@@ -31,7 +33,7 @@ export default function Voice() {
   const [catalog,setCatalog] = useState([]);
   const [catalogBusy,setCatalogBusy] = useState(false);
   const [catalogNote,setCatalogNote] = useState('');
-  const [voiceForm,setVoiceForm] = useState({nom:'',langue:'',provider:'GOOGLE_CLOUD',model_id:'',voice_id:'',style:''});
+  const [voiceForm,setVoiceForm] = useState({nom:'',langue:'',provider:'GTTS',model_id:'',voice_id:'',style:''});
   const blankScene = () => ({noeud:'',langue:'',mode:'TEXT_ONLY',image:'',video:'',audio:'',narration_texte:'',voix:'',sync_mode:'FREEZE_LAST',audio_trim_start_ms:0,audio_trim_end_ms:null});
   const [sceneForm,setSceneForm] = useState(blankScene);
   const [audioUpload,setAudioUpload] = useState({file:null, title:'',licence:'',rights:false});
@@ -67,6 +69,9 @@ export default function Voice() {
     FFMPEG_NOT_INSTALLED:'FFmpeg absent du worker',
     RENDER_FAILED:'Échec du rendu FFmpeg',
     TTS_DAILY_LIMIT:'Quota TTS épuisé',
+    TTS_GTTS_NOT_INSTALLED:'Bibliothèque gTTS absente du worker : reconstruire son image',
+    TTS_GTTS_UNAVAILABLE:'Google Traduction temporairement inaccessible au worker',
+    TTS_PROVIDER_ERROR:'Fournisseur TTS externe en erreur (essayer gTTS FR)',
   })[code] || code || 'Erreur inconnue';
   const trackStatus = (nodeId, code) => {
     const scene = nodeScene(nodeId, code);
@@ -75,8 +80,8 @@ export default function Voice() {
     const status = job?.statut;
     if (status === 'PENDING') return {label:`En attente du worker · ${job.type}${job.created_at && Date.now()-new Date(job.created_at).getTime()>120000 ? ' (vérifier Celery)' : ''}`,state:'pending'};
     if (status === 'RUNNING') return {label:`En cours · ${job.type}`,state:'running'};
-    if (status === 'FAILED' && scene.statut !== 'READY') return {label:`Échec · ${jobFailureLabel(job.code_erreur)}`,state:'failed'};
     if (scene.statut === 'READY' && scene.audio_finale) return mediaById(scene.audio)?.droits_confirmes === false || mediaById(scene.audio_finale)?.droits_confirmes === false ? {label:'Terminé · droits à valider',state:'draft'} : {label:'Terminé · piste finalisée',state:'ready'};
+    if (status === 'FAILED' && scene.statut !== 'READY') return {label:`Échec · ${jobFailureLabel(job.code_erreur)}`,state:'failed'};
     if (scene.audio) return {label:'Fichier reçu · rendu à terminer',state:'draft'};
     if (scene.narration_texte) return {label:'Texte enregistré · aucun worker TTS actif',state:'draft'};
     return {label:'Aucune tâche ni piste',state:'missing'};
@@ -89,7 +94,7 @@ export default function Voice() {
     setQuickTrack({nodeId:node.id,language:code,existing:scene?.id || '',
       audio:scene?.audio || scene?.audio_finale || '',
       text:scene?.narration_texte || (code === 'fr' ? node.texte_fr || '' : ''),
-      voice:scene?.voix || voices.find(v=>v.actif && String(v.langue)===String(languages.find(l=>l.code===code)?.id))?.id || '',
+      voice:(code==='fr' && voices.find(v=>v.actif&&v.provider==='GTTS'&&String(v.langue)===String(languages.find(l=>l.code==='fr')?.id))?.id) || scene?.voix || voices.find(v=>v.actif && String(v.langue)===String(languages.find(l=>l.code===code)?.id))?.id || '',
       sync_mode:scene?.sync_mode || 'FREEZE_LAST',
       audio_trim_start_ms:scene?.audio_trim_start_ms || 0,
       audio_trim_end_ms:scene?.audio_trim_end_ms ?? null,
@@ -108,52 +113,62 @@ export default function Voice() {
     if (quickSource==='text' && !quickTrack.text.trim()) {setQuickError('Renseigne le texte français à lire.');return;}
     setQuickSaving(true);
     try {
-      const suppliedVoice = voices.find(v=>v.actif && String(v.id)===String(quickTrack.voice) && String(v.langue)===String(language.id)) || voices.find(v=>v.actif && String(v.langue)===String(language.id));
-      let audioId = quickSource === 'file' ? quickTrack.audio || null : null;
-      if (quickSource === 'file' && quickFile) {
-        const form = new FormData();
-        form.append('fichier',quickFile);
-        form.append('type','AUDIO');
-        form.append('langue',quickTrack.language);
-        form.append('titre',quickFile.name.replace(/\.[^.]+$/, '').slice(0,200) || 'Narration');
-        form.append('licence','Voix importée par l’administrateur · droits de diffusion confirmés');
-        form.append('droits_confirmes','true');
-        const uploaded = await studioApi.upload(form);
-        audioId = uploaded.data.id;
-        setQuickFile(null);
-        setQuickTrack(p=>({...p,audio:audioId}));
+      const suppliedVoice = voices.find(v=>v.actif && String(v.id)===String(quickTrack.voice) && String(v.langue)===String(language.id))
+        || voices.find(v=>v.actif && v.provider==='GTTS'&&String(v.langue)===String(language.id))
+        || voices.find(v=>v.actif && String(v.langue)===String(language.id));
+      const existing = nodeScene(quickTrack.nodeId,quickTrack.language);
+      if (quickSource==='text') {
+        if (!suppliedVoice) throw new Error('Aucune voix française : applique la migration gTTS puis actualise.');
+        let sceneId = existing?.id;
+        if (!sceneId) {
+          const response = await studioApi.createScene({noeud:quickTrack.nodeId,langue:language.id,
+            mode:quickTrack.video?'VIDEO_AUDIO':quickTrack.image?'IMAGE_AUDIO':'AUDIO_ONLY',
+            video:quickTrack.video||null,image:quickTrack.video?null:quickTrack.image||null,
+            voix:suppliedVoice.id,narration_texte:quickTrack.text.trim(),
+            sync_mode:quickTrack.sync_mode});
+          sceneId = response.data.id;
+        }
+        // Ne pas remplacer la piste existante avant que la nouvelle synthèse ait réussi.
+        await studioApi.tts({scene:sceneId,voix:suppliedVoice.id,texte:quickTrack.text.trim(),
+          titre:`gTTS FR · ${new Date().toLocaleString('fr-FR')}`,activer:true,
+          sync_mode:quickTrack.sync_mode,audio_trim_start_ms:Number(quickTrack.audio_trim_start_ms||0),
+          audio_trim_end_ms:quickTrack.audio_trim_end_ms??null});
+      } else {
+        let audioId=quickTrack.audio||null;
+        if (quickFile) {
+          const form=new FormData();
+          form.append('fichier',quickFile);form.append('type','AUDIO');form.append('langue',quickTrack.language);
+          form.append('titre',quickFile.name.replace(/\.[^.]+$/,'').slice(0,200)||'Narration');
+          form.append('licence','Voix importée par l’administrateur · droits de diffusion confirmés');
+          form.append('droits_confirmes','true');
+          const uploaded=await studioApi.upload(form);
+          audioId=uploaded.data.id;
+        }
+        const payload={noeud:quickTrack.nodeId,langue:language.id,
+          mode:quickTrack.video?'VIDEO_AUDIO':quickTrack.image?'IMAGE_AUDIO':'AUDIO_ONLY',
+          video:quickTrack.video||null,image:quickTrack.video?null:quickTrack.image||null,
+          audio:audioId,voix:null,narration_texte:'',sync_mode:quickTrack.sync_mode,
+          audio_trim_start_ms:Number(quickTrack.audio_trim_start_ms||0),
+          audio_trim_end_ms:quickTrack.audio_trim_end_ms??null};
+        const saved=existing ? await studioApi.updateScene(existing.id,payload) : await studioApi.createScene(payload);
+        if(audioId)await studioApi.render(saved.data.id);
       }
-      const existing = scenes.find(s => String(s.noeud)===String(quickTrack.nodeId) && String(s.langue)===String(language.id));
-      const payload = {
-        noeud:quickTrack.nodeId,langue:language.id,
-        mode: quickTrack.video ? 'VIDEO_AUDIO' : quickTrack.image ? 'IMAGE_AUDIO' : 'AUDIO_ONLY',
-        video: quickTrack.video || null, image:quickTrack.video ? null : (quickTrack.image || null),
-        audio:audioId,
-        voix:quickSource==='text' ? (suppliedVoice?.id || null) : null,
-        narration_texte:quickSource==='text' ? quickTrack.text.trim() : '',
-        sync_mode:quickTrack.sync_mode,
-        audio_trim_start_ms:Number(quickTrack.audio_trim_start_ms || 0),
-        audio_trim_end_ms:quickTrack.audio_trim_end_ms === '' ? null : quickTrack.audio_trim_end_ms,
-      };
-      const saved = existing ? await studioApi.updateScene(existing.id,payload) : await studioApi.createScene(payload);
-      if (audioId) await studioApi.render(saved.data.id);
       await refresh();
       setDialog(null);setQuickTrack(null);
-    } catch (e) {
-      setQuickError(apiError(e));
-      await refresh().catch(()=>{});
-    } finally {setQuickSaving(false);}
+    } catch (e) {setQuickError(apiError(e));await refresh().catch(()=>{});}
+    finally {setQuickSaving(false);}
   };
   const chosenScene = scenes.find(s => s.id === synth.scene);
   const voiceLanguage = languages.find(l=>l.id===voiceForm.langue)?.code;
   const selectedLang = languages.find(l => l.code === synth.langue);
   const toggleExpand = key => setExpanded(previous => ({...previous,[key]:!previous[key]}));
-  const showScenePreview = (id, code = 'fr') => { setPreviewLang(code);setPreviewSceneId(id);setActiveStudioTab('renders'); };
+  const showScenePreview = (id, code = 'fr') => { setPreviewLang(code);setPreviewVariantId('active');setPreviewSceneId(id);setActiveStudioTab('renders'); };
   useEffect(() => {
     if (activeStudioTab !== 'renders' || !previewSceneId) return;
     document.getElementById(`scene-${previewSceneId}`)?.scrollIntoView({behavior:'smooth',block:'nearest'});
   }, [activeStudioTab, previewSceneId]);
-  const voiceChoices = voices.filter(v => v.actif && (!chosenScene || v.langue===chosenScene.langue) && (!selectedLang || v.langue===selectedLang.id));
+  const voiceChoices = voices.filter(v => v.actif && (!selectedLang || String(v.langue)===String(selectedLang.id)));
+  const chosenVoice = voiceChoices.find(v=>String(v.id)===String(synth.voix)) || (synth.langue==='fr'&&voiceChoices.find(v=>v.provider==='GTTS')) || voiceChoices[0];
   useEffect(()=>{if(!jobs.some(j=>['PENDING','RUNNING'].includes(j.statut)))return;const timer=setInterval(()=>refresh(),4000);return()=>clearInterval(timer)},[jobs,refresh]);
   const stop = () => {if(supported) window.speechSynthesis.cancel();setPlaying(false)};
   useEffect(() => () => {if(supported) window.speechSynthesis.cancel()},[supported]);
@@ -194,13 +209,32 @@ export default function Voice() {
   const generate = async e => {
     e.preventDefault();setError('');
     try {await perform(async()=>{
-      const nodeId=synth.scene.startsWith('node:')?synth.scene.slice(5):scenes.find(s=>s.id===synth.scene)?.noeud;
+      if(!chosenVoice || !synth.texte.trim())throw new Error('Choisis un profil vocal et renseigne un texte.');
+      const nodeId=synth.scene.startsWith('node:')?synth.scene.slice(5):scenes.find(s=>String(s.id)===String(synth.scene))?.noeud;
+      if(!nodeId)throw new Error('Scène introuvable.');
       const language=languages.find(l=>l.code===synth.langue);
-      const existing=nodeScene(nodeId,synth.langue);
-      const base=existing||nodeScene(nodeId,'fr');
-      const data={noeud:nodeId,langue:language.id,voix:synth.voix,narration_texte:synth.texte,audio:null,
-        video:base?.video||null,image:base?.image||null,mode:base?.video?'VIDEO_AUDIO':base?.image?'IMAGE_AUDIO':'AUDIO_ONLY'};
-      return existing?studioApi.updateScene(existing.id,data):studioApi.createScene(data);
+      let existing=nodeScene(nodeId,synth.langue);
+      if(!existing){
+        const base=nodeScene(nodeId,'fr');
+        const response=await studioApi.createScene({noeud:nodeId,langue:language.id,
+          video:base?.video||null,image:base?.video?null:base?.image||null,
+          mode:base?.video?'VIDEO_AUDIO':base?.image?'IMAGE_AUDIO':'AUDIO_ONLY',
+          narration_texte:synth.texte,voix:chosenVoice.id});
+        existing=response.data;
+      }
+      // Chaque génération crée une nouvelle variante. Les anciennes ne sont jamais écrasées.
+      return studioApi.tts({scene:existing.id,voix:chosenVoice.id,texte:synth.texte.trim(),
+        titre:`${chosenVoice.nom} · ${new Date().toLocaleString('fr-FR')}`.slice(0,160),
+        activer:synthActivate,sync_mode:existing.sync_mode||'FREEZE_LAST'});
+    })}catch(e){setError(e.message)}
+  };
+  const chooseVariant = async (scene, variantId) => {
+    setError('');
+    try {await perform(async()=>{
+      if (variantId) {
+        await studioApi.selectVariant(scene.id,variantId);
+        await studioApi.render(scene.id);
+      } else {await studioApi.clearVariant(scene.id);}
     })}catch(e){setError(e.message)}
   };
   const render=async id=>{if(!confirm('Assembler maintenant la vidéo et la voix avec FFmpeg ?'))return;setError('');try{await perform(()=>studioApi.render(id))}catch(e){setError(e.message)}};
@@ -228,7 +262,7 @@ export default function Voice() {
   };
   return <div className="page-stack">
     <div className="stats-grid compact-stats">
-      <StatCard label="Voix configurées" value={voices.length} note="Google Cloud / ElevenLabs / Gemini" icon={Mic2} tone="purple"/>
+      <StatCard label="Voix configurées" value={voices.length} note="gTTS français / autres voix" icon={Mic2} tone="purple"/>
       <StatCard label="Nœuds distincts" value={uniqueMediaNodes} note={`${scenes.length} variantes FR/MG`} icon={AudioLines} tone="blue"/>
       <StatCard label="Jobs terminés" value={jobs.filter(j=>j.statut==='SUCCESS').length} note="TTS / Rendu" icon={FileAudio} tone="purple"/>
       <StatCard label="En attente" value={jobs.filter(j=>['PENDING','RUNNING'].includes(j.statut)).length} note="Tâches asynchrones" icon={WandSparkles} tone="blue"/>
@@ -258,20 +292,27 @@ export default function Voice() {
         </button>
         {expanded.django && <div className="voice-collapse-body"><form className="form-stack" onSubmit={generate}>
         <Field label="Langue"><select value={synth.langue} onChange={e=>setSynth(s=>({...s,langue:e.target.value,scene:'',voix:''}))}><option value="fr">Français</option><option value="mg">Malagasy</option></select></Field>
-        <Field label="Scène / fin narrative"><select value={synth.scene} onChange={e=>setSynth(p=>({...p,scene:e.target.value,voix:''}))} required>
+        <Field label="Scène / fin narrative"><select value={synth.scene} onChange={e=>{
+          const value=e.target.value;
+          const nodeId=value.startsWith('node:')?value.slice(5):scenes.find(s=>String(s.id)===String(value))?.noeud;
+          const node=nodes.find(n=>String(n.id)===String(nodeId));
+          const scene=nodeScene(nodeId,synth.langue);
+          setSynth(p=>({...p,scene:value,texte:scene?.narration_texte || (synth.langue==='fr'?node?.texte_fr||'':p.texte),voix:''}));
+        }} required>
           <option value="">Choisir une scène ou une fin</option>
           {availableNodes.map(n=>{
             const match=scenes.find(s=>s.noeud===n.id&&s.langue===selectedLang?.id);
             return <option key={n.id} value={match?.id||`node:${n.id}`}>{n.titre_fr} · {match ? match.mode : 'Montage à créer automatiquement'}</option>;
           })}
         </select></Field>
-        <Field label="Voix enregistrée"><select value={synth.voix} onChange={e=>setSynth(p=>({...p,voix:e.target.value}))} required>
+        <Field label="Voix enregistrée"><select value={chosenVoice?.id||''} onChange={e=>setSynth(p=>({...p,voix:e.target.value}))} required>
           <option value="">Choisir un profil de voix</option>{voiceChoices.map(v=><option key={v.id} value={v.id}>{v.nom} · {v.provider}</option>)}
         </select></Field>
-        {!voiceChoices.length&&<span className="muted">Aucune voix configurée pour cette langue. Clique sur « Configurer une voix » pour consulter les fournisseurs.</span>}
+        {!voiceChoices.length&&<span className="muted">Aucune voix configurée. La migration ajoute gTTS français automatiquement.</span>}
         <Field label="Texte à convertir"><textarea rows={4} value={synth.texte} maxLength={1200} onChange={e=>setSynth(p=>({...p,texte:e.target.value}))} required/></Field>
-        <button type="submit" className="btn btn-primary" disabled={busy||!synth.scene||!synth.voix||!synth.texte.trim()}><Mic2 size={16}/> Générer la voix et préparer le rendu</button>
-        <div className="soft-note">Lorsque la scène possède déjà une image ou vidéo, le TTS déclenche automatiquement l'assemblage après réussite. Si aucun visuel n'est associé, la narration est conservée comme audio seul. Google Cloud possède un quota gratuit limité et peut facturer les dépassements.</div>
+        <label className="voice-activate-choice"><input type="checkbox" checked={synthActivate} onChange={e=>setSynthActivate(e.target.checked)}/> Activer cette nouvelle piste après génération (les anciennes restent disponibles)</label>
+        <button type="submit" className="btn btn-primary" disabled={busy||!synth.scene||!chosenVoice||!synth.texte.trim()}><Mic2 size={16}/> Générer la voix et préparer le rendu</button>
+        <div className="soft-note">Lorsque la scène possède déjà une image ou vidéo, le TTS déclenche automatiquement l'assemblage après réussite. Si aucun visuel n'est associé, la narration est conservée comme audio seul. Par défaut, gTTS français ne nécessite aucune clé API. Le service Google Traduction utilisé par gTTS est non officiel et peut être limité ou indisponible. Les pistes restent privées avant validation des droits.</div>
       </form></div>}
       </section>
     </div>
@@ -293,27 +334,39 @@ export default function Voice() {
         <div className="story-node-heading"><strong>{group.story.title}</strong><Link className="btn btn-outline" to={`/previsualisation?story=${encodeURIComponent(group.story.id)}`}><Play size={14}/> Lire le parcours complet</Link></div>
         {group.items.map(n => <div className="story-node-row" key={n.id}>
           <div><strong>{n.titre_fr}</strong><small>{n.type === 'DECISION' ? 'DÉCISION : choix du joueur, sans vidéo' : n.type === 'ENDING' ? 'FIN' : 'SCÈNE'}</small></div>
-          {n.type !== 'DECISION' && ['fr','mg'].map(code => {const sc=nodeScene(n.id,code);const status=trackStatus(n.id,code);return <div className="story-node-language" key={code}><span className={`track-status track-status-${status.state}`} title={status.label}>{code.toUpperCase()} : {status.label}</span><button className="btn btn-outline" disabled={busy} onClick={() => openQuickTrack(n,code)}>{sc?.audio || sc?.narration_texte ? 'Modifier' : 'Associer'} audio {code.toUpperCase()}</button></div>})}
+          {n.type !== 'DECISION' && ['fr','mg'].map(code => {const sc=nodeScene(n.id,code);const status=trackStatus(n.id,code);const variants=sc?.audio_variants||[];return <div className={code==='fr' ? 'story-node-language story-node-language-multi' : 'story-node-language'} key={code}>
+            <span className={`track-status track-status-${status.state}`} title={status.label}>{code.toUpperCase()} : {status.label}</span>
+            {code==='fr' && sc && <label className="voice-variant-picker">{variants.length} piste{variants.length>1?'s':''} FR
+              <select aria-label={`Piste française active de ${n.titre_fr}`} disabled={busy} value={variants.find(v=>v.selected)?.id || ''} onChange={e=>chooseVariant(sc,e.target.value)}>
+                <option value="">Aucune piste active</option>
+                {variants.map(v=><option key={v.id} value={v.id} disabled={!v.audio}>{v.titre} · {v.job_status==='FAILED'?'Échec':v.audio?'Disponible':'En cours'}</option>)}
+              </select></label>}
+            <button className="btn btn-outline" disabled={busy} onClick={() => openQuickTrack(n,code)}>{sc?.audio || sc?.narration_texte ? 'Modifier' : 'Associer'} audio {code.toUpperCase()}</button></div>})}
           {n.type !== 'DECISION'&&<div className="story-node-actions"><button className="btn btn-outline" disabled={busy} onClick={()=>{setTrackOnly(false);const sc=nodeScene(n.id,'fr');sc?editScene(sc):openNodeForLanguage(n,'fr')}}>Paramètres</button><button className="btn btn-outline" disabled={!nodeScene(n.id,'fr')} onClick={()=>{const sc=nodeScene(n.id,'fr');if(sc)showScenePreview(sc.id,'fr')}}>Voir · FR</button></div>}
         </div>)}
       </div>)}
       {!storyNodes.length && <div className="empty-state">Aucun nœud Django appliqué. Reviens dans « Arbres narratifs », enregistre puis applique le graphe.</div>}
-      <span className="muted">La narration française est obligatoire pour chaque scène et fin. La piste malagasy est facultative. Sans fichier FR, le texte de la scène est synthétisé avec une voix configurée. Un nœud narratif peut avoir deux montages distincts (FR et MG). « DRAFT » signifie que le média n'est pas encore finalisé ; « READY » indique un rendu prêt. Les décisions ne nécessitent pas de média.</span>
+      <span className="muted">Chaque scène peut posséder zéro, une ou plusieurs pistes françaises, mais une piste FR finalisée reste obligatoire pour publier. Choisir une autre piste la réassemble sans supprimer les autres. La narration française est obligatoire pour chaque scène et fin. La piste malagasy est facultative. Sans fichier FR, le texte de la scène est synthétisé avec une voix configurée. Un nœud narratif peut avoir deux montages distincts (FR et MG). « DRAFT » signifie que le média n'est pas encore finalisé ; « READY » indique un rendu prêt. Les décisions ne nécessitent pas de média.</span>
     </div>}
     {activeStudioTab==='renders'&&<div className="resource-list voice-tab-content">
       {scenes.map(s=><div className="resource-list-row studio-preview-row" id={`scene-${s.id}`} key={s.id}><span className="resource-list-icon"><AudioLines size={18}/></span><span className="resource-list-main"><strong>{nodes.find(n=>n.id===s.noeud)?.titre_fr||s.noeud}</strong><small>{s.mode} · {languages.find(l=>l.id===s.langue)?.code||s.langue} · {trackStatus(s.noeud,languages.find(l=>l.id===s.langue)?.code||'fr').label}</small></span><div className="table-actions"><button className="btn btn-outline" disabled={busy} onClick={()=>editScene(s)}>Modifier</button>
       {s.audio&&!mediaById(s.audio)?.droits_confirmes&&<button className="btn btn-outline" disabled={busy} onClick={()=>{const licence=window.prompt('Licence vérifiée de cette voix générée :');if(licence?.trim())run(async()=>{await studioApi.confirmRights(s.audio,licence.trim());await studioApi.render(s.id)})}}>Valider les droits de la voix</button>}
       <button disabled={s.mode==='TEXT_ONLY'||busy} className="btn btn-outline" onClick={()=>render(s.id)}>{s.mode==='AUDIO_ONLY'?'Finaliser la voix':'Assembler'}</button>
-      <button type="button" className="btn btn-outline" onClick={()=>{setPreviewLang(languages.find(l=>l.id===s.langue)?.code||'fr');setPreviewSceneId(p=>p===s.id?null:s.id)}}>{previewSceneId===s.id?'Fermer l’aperçu':'Écouter / Voir'}</button></div>
+      <button type="button" className="btn btn-outline" onClick={()=>{setPreviewLang(languages.find(l=>l.id===s.langue)?.code||'fr');setPreviewVariantId('active');setPreviewSceneId(p=>p===s.id?null:s.id)}}>{previewSceneId===s.id?'Fermer l’aperçu':'Écouter / Voir'}</button></div>
       {previewSceneId===s.id&&<div className="studio-scene-preview">
         <div className="studio-preview-heading">
           <strong>Aperçu de la scène et de sa narration</strong>
-          <label>Voix <select value={previewLang} onChange={e=>setPreviewLang(e.target.value)} aria-label="Langue de la piste audio">
+          <label>Voix <select value={previewLang} onChange={e=>{setPreviewLang(e.target.value);setPreviewVariantId('active')}} aria-label="Langue de la piste audio">
             <option value="fr">Français (FR)</option><option value="mg">Malagasy (MG)</option>
           </select></label>
+          {previewLang==='fr' && <label>Piste FR <select value={previewVariantId} onChange={e=>setPreviewVariantId(e.target.value)}>
+            <option value="active">Piste active</option>
+            {(nodeScene(s.noeud,'fr')?.audio_variants||[]).filter(v=>v.audio_url).map(v=><option key={v.id} value={v.id}>{v.titre}</option>)}
+          </select></label>}
         </div>
         {(() => {
-          const sources = draftSceneSources({scenes,languages,media,nodeId:s.noeud,lang:previewLang});
+          const sources = draftSceneSources({scenes,languages,media,nodeId:s.noeud,lang:previewLang,
+            variantId:previewLang==='fr'&&previewVariantId!=='active'?previewVariantId:null});
           return <>
             {sources.audioLanguage && sources.audioLanguage !== previewLang && <p className="form-hint" role="status">Piste {previewLang.toUpperCase()} indisponible : lecture de la piste FR.</p>}
             {!sources.audio && !sources.embeddedAudio && <p className="form-hint">Aucune narration disponible : configure ou finalise la piste FR.</p>}
@@ -354,7 +407,8 @@ export default function Voice() {
     </Dialog>}
     {dialog==='voice'&&<Dialog title="Configurer une voix TTS" onClose={()=>setDialog(null)}><form className="form-stack" onSubmit={createVoice}>
       <Field label="Langue"><select required value={voiceForm.langue} onChange={e=>{setVoiceForm(p=>({...p,langue:e.target.value,voice_id:''}));setCatalog([])}}><option value="">Choisir une langue</option>{languages.map(l=><option key={l.id} value={l.id}>{l.nom_fr||l.code}</option>)}</select></Field>
-      <Field label="Fournisseur"><select value={voiceForm.provider} onChange={e=>{setVoiceForm(p=>({...p,provider:e.target.value,model_id:'',voice_id:''}));setCatalog([])}}><option value="GOOGLE_CLOUD">Google Cloud TTS (quota limité)</option><option value="ELEVENLABS">ElevenLabs (plan gratuit limité)</option><option value="GEMINI">Gemini</option></select></Field>
+      <Field label="Fournisseur"><select value={voiceForm.provider} onChange={e=>{setVoiceForm(p=>({...p,provider:e.target.value,model_id:'',voice_id:''}));setCatalog([])}}><option value="GTTS">gTTS français (par défaut, sans clé)</option><option value="GOOGLE_CLOUD">Google Cloud TTS (quota limité)</option><option value="ELEVENLABS">ElevenLabs (plan gratuit limité)</option><option value="GEMINI">Gemini</option></select></Field>
+      {voiceForm.provider==='GTTS'&&<p className="form-hint">gTTS français est normalement déjà ajouté automatiquement. Ce formulaire ne sert qu'à créer un profil absent (model_id : gtts-fr, voice_id : fr).</p>}
       {voiceForm.provider!=='GEMINI'&&<button className="btn btn-outline" type="button" onClick={loadVoices} disabled={catalogBusy||!voiceForm.langue}><RefreshCw size={15}/>{catalogBusy?'Recherche…':'Charger les voix disponibles'}</button>}
       {catalogNote&&<p className="form-hint">{catalogNote}</p>}
       {!!catalog.length&&<Field label="Voix proposées par l'API"><select value="" onChange={e=>{const v=catalog[Number(e.target.value)];if(v)setVoiceForm(p=>({...p,nom:v.name,model_id:v.model_id,voice_id:v.voice_id}))}}><option value="">Choisir une voix</option>{catalog.map((v,i)=><option value={String(i)} key={v.voice_id}>{v.name} · {v.provider}</option>)}</select></Field>}

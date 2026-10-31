@@ -19,7 +19,7 @@ function fallbackSource(scene, field, media) {
   return adminMediaUrl(scene[field] || media.find(asset => String(asset.id) === String(scene[field === 'video_source_url' ? 'video' : field === 'image_source_url' ? 'image' : 'audio']))?.fichier_url);
 }
 
-export function draftSceneSources({ scenes, languages, media, nodeId, lang = 'fr' }) {
+export function draftSceneSources({ scenes, languages, media, nodeId, lang = 'fr', variantId = null }) {
   const getScene = code => {
     const language = languages.find(l => l.code === code);
     return scenes.find(s => String(s.noeud) === String(nodeId) && String(s.langue) === String(language?.id));
@@ -28,9 +28,10 @@ export function draftSceneSources({ scenes, languages, media, nodeId, lang = 'fr
   const french = getScene('fr');
   // Garder le même visuel lors du changement de langue, seule la piste change.
   const visual = french?.video || french?.image ? french : chosen;
-  const chosenTrack = (chosen?.statut === 'READY' ? chosen.audio_finale_url : null) ||
-    chosen?.audio_source_url || (chosen?.audio ? chosen?.audio_tracks?.[lang]?.url : null) ||
-    fallbackSource(chosen,'audio_source_url',media);
+  const override = chosen?.audio_variants?.find(v => String(v.id) === String(variantId) && v.audio_url);
+  const chosenTrack = override?.audio_url || (variantId ? null : (chosen?.statut === 'READY' ? chosen.audio_finale_url : null)) ||
+    (!variantId && (chosen?.audio_source_url || (chosen?.audio ? chosen?.audio_tracks?.[lang]?.url : null) ||
+    fallbackSource(chosen,'audio_source_url',media)));
   const frenchTrack = (french?.statut === 'READY' ? french.audio_finale_url : null) ||
     french?.audio_source_url || (french?.audio ? french?.audio_tracks?.fr?.url : null) ||
     fallbackSource(french,'audio_source_url',media);
