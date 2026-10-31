@@ -86,6 +86,13 @@ class MediaUploadInput(serializers.Serializer):
     fichier = serializers.FileField()
 
 
+class MediaMetadataInput(serializers.Serializer):
+    """Edition des seules métadonnées : le fichier, son type et son hash restent immuables."""
+    titre = serializers.CharField(max_length=200, required=False, allow_blank=False, trim_whitespace=True)
+    licence = serializers.CharField(max_length=160, required=False, allow_blank=False, trim_whitespace=True)
+    langue = serializers.CharField(max_length=2, required=False, allow_blank=True)
+
+
 class TTSInput(serializers.Serializer):
     scene = serializers.PrimaryKeyRelatedField(queryset=SceneMedia.objects.all())
     voix = serializers.PrimaryKeyRelatedField(queryset=VoiceProfile.objects.filter(actif=True))

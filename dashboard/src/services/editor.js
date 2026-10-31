@@ -41,6 +41,7 @@ export const studioApi = {
   media: () => allPages(`${studio}/media/`),
   upload: form => api.post(`${studio}/media/upload/`, form, { timeout: 120000 }),
   deleteMedia: id => api.delete(`${studio}/media/${id}/delete/`),
+  updateMedia: (id, data) => api.patch(`${studio}/media/${id}/update/`, data),
   file: id => api.get(`${studio}/media/${id}/file/`, { responseType: 'blob', timeout: 120000 }),
   voices: () => allPages(`${studio}/voices/`),
   createVoice: data => api.post(`${studio}/voices/create/`, data),

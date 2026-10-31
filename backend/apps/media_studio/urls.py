@@ -6,6 +6,7 @@ urlpatterns = [
     path('media/upload/', views.MediaUploadAPIView.as_view(), name='studio-media-upload'),
     path('media/<uuid:pk>/', views.MediaDetailAPIView.as_view(), name='studio-media-detail'),
     path('media/<uuid:pk>/file/', views.MediaFileAPIView.as_view(), name='studio-media-download'),
+    path('media/<uuid:pk>/update/', views.MediaUpdateAPIView.as_view(), name='studio-media-update'),
     path('media/<uuid:pk>/rights-confirm/', views.MediaRightsConfirmAPIView.as_view(), name='studio-media-rights'),
     path('media/<uuid:pk>/delete/', views.MediaDeleteAPIView.as_view(), name='studio-media-delete'),
     path('scenes/', views.SceneListAPIView.as_view(), name='studio-scenes-list'),

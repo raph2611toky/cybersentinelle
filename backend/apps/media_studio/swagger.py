@@ -2,7 +2,8 @@
 from drf_yasg import openapi
 from drf_yasg.utils import swagger_auto_schema
 from .serializers import (MediaAssetSerializer, SceneSerializer, VoiceSerializer, JobSerializer, DialogueSerializer,
-    MediaListResponseSerializer, SceneListResponseSerializer, VoiceListResponseSerializer,
+    MediaListResponseSerializer, SceneListResponseSerializer,
+    MediaMetadataInput, VoiceListResponseSerializer,
     JobListResponseSerializer, DialogueListResponseSerializer)
 
 ERROR = openapi.Schema(type=openapi.TYPE_OBJECT, required=['error'], properties={
@@ -46,6 +47,7 @@ media_upload_doc = swagger_auto_schema(operation_summary='Importer un média ima
       openapi.Parameter('langue', openapi.IN_FORM, type=openapi.TYPE_STRING, required=False, enum=['fr','mg']),
       openapi.Parameter('fichier', openapi.IN_FORM, type=openapi.TYPE_FILE, required=True),
     ], responses=responses(obj(MediaAssetSerializer), 201))
+media_update_doc = swagger_auto_schema(operation_summary='Modifier les métadonnées d’un média privé (sans remplacer le fichier)', tags=['Studio / Médias'], request_body=MediaMetadataInput, responses=responses(obj(MediaAssetSerializer)))
 media_delete_doc = swagger_auto_schema(operation_summary='Supprimer un média non utilisé', tags=['Studio / Médias'], responses=responses(
     openapi.Schema(type=openapi.TYPE_OBJECT, properties={'deleted': openapi.Schema(type=openapi.TYPE_BOOLEAN)})))
 scene_list_doc = swagger_auto_schema(operation_summary='Lister les médias des nœuds (filtre ?noeud=UUID)', tags=['Studio / Scènes'], responses=responses(SceneListResponseSerializer()))

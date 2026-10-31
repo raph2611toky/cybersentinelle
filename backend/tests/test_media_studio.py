@@ -78,3 +78,74 @@ def test_each_studio_business_view_one_method_and_catches_general_exceptions():
         assert len(verb_methods) == 1, cls.name
         assert any(isinstance(x, ast.ExceptHandler) and isinstance(x.type, ast.Name)
                    and x.type.id == 'Exception' for x in ast.walk(verb_methods[0])), cls.name
+
+
+@pytest.fixture
+def demo_asset(db):
+    """Fichier privé miniature ; aucun appel à FFprobe nécessaire pour ce test HTTP."""
+    asset = MediaAsset.objects.create(
+        titre='Extrait Miora', type='VIDEO', mime_type='video/mp4',
+        fichier=SimpleUploadedFile('frame.mp4', b'0123456789', content_type='video/mp4'),
+        licence='Création originale', droits_confirmes=True,
+        sha256='0' * 64, taille_octets=10,
+    )
+    try:
+        yield asset
+    finally:
+        asset.fichier.delete(save=False)
+
+
+@pytest.mark.django_db
+def test_video_range_206_supports_private_previews(api, demo_asset):
+    url = reverse('studio-media-download', kwargs={'pk': demo_asset.pk})
+    response = api.get(url, HTTP_RANGE='bytes=2-5')
+    assert response.status_code == 206
+    assert response['Accept-Ranges'] == 'bytes'
+    assert response['Content-Range'] == 'bytes 2-5/10'
+    assert response['Content-Length'] == '4'
+    assert b''.join(response.streaming_content) == b'2345'
+
+    suffix = api.get(url, HTTP_RANGE='bytes=-3')
+    assert suffix.status_code == 206
+    assert b''.join(suffix.streaming_content) == b'789'
+
+    invalid_range = api.get(url, HTTP_RANGE='bytes=99-120')
+    assert invalid_range.status_code == 416
+    assert invalid_range['Content-Range'] == 'bytes */10'
+
+
+@pytest.mark.django_db
+def test_media_update_only_metadata(api, demo_asset):
+    lang = Langue.objects.create(
+        code='fr', nom_fr='Français', nom_mg='Frantsay', nom_natif='Français', actif=True
+    )
+    url = reverse('studio-media-update', kwargs={'pk': demo_asset.pk})
+    old_file = demo_asset.fichier.name
+    response = api.patch(url, {
+        'titre': 'Miora — scène 1', 'licence': 'Production Safidiko', 'langue': lang.code,
+    }, format='json')
+    assert response.status_code == 200, getattr(response, 'data', response.content)
+    assert response.json()['titre'] == 'Miora — scène 1'
+    demo_asset.refresh_from_db()
+    assert demo_asset.langue_id == lang.pk
+    assert demo_asset.fichier.name == old_file
+    assert demo_asset.sha256 == '0' * 64
+
+    refused = api.patch(url, {'type': 'IMAGE'}, format='json')
+    assert refused.status_code == 400
+    assert refused.json()['error']['code'] == 'BAD_REQUEST'
+
+    cleared = api.patch(url, {'langue': ''}, format='json')
+    assert cleared.status_code == 200
+    demo_asset.refresh_from_db()
+    assert demo_asset.langue is None
+
+
+@pytest.mark.django_db
+def test_private_media_preview_range_needs_auth(demo_asset):
+    public_client = APIClient()
+    response = public_client.get(
+        reverse('studio-media-download', kwargs={'pk': demo_asset.pk}),
+        HTTP_RANGE='bytes=0-2'
+    )
+    assert response.status_code in (401, 403)

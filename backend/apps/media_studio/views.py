@@ -1,11 +1,12 @@
 """Une classe APIView et une seule méthode HTTP par opération. Aucun ViewSet."""
 import logging
+import re
 from pathlib import Path
 from django.conf import settings
 from django.core.exceptions import ValidationError as DjangoValidationError
 from django.db import IntegrityError, transaction
 from django.db.models.deletion import ProtectedError, RestrictedError
-from django.http import FileResponse, Http404
+from django.http import FileResponse, Http404, StreamingHttpResponse, HttpResponse
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from rest_framework import serializers
@@ -16,7 +17,7 @@ from apps.core.models import Langue
 from helpers.api.responses import error, failed
 from .models import MediaAsset, VoiceProfile, SceneMedia, GenerationJob, DialogueLine
 from .permissions import StudioPermissions
-from .serializers import (MediaAssetSerializer, MediaUploadInput, VoiceSerializer,
+from .serializers import (MediaAssetSerializer, MediaUploadInput, MediaMetadataInput, VoiceSerializer,
     SceneSerializer, DialogueSerializer, JobSerializer, TTSInput)
 from .services.media import persist_upload
 from .tasks import process_studio_job
@@ -83,6 +84,40 @@ class MediaDetailAPIView(APIView):
             return failed(exc)
 
 
+def stream_range(file_obj, start, length, chunk_size=64 * 1024):
+    """Transmet uniquement la portion demandée ; ferme le fichier après diffusion."""
+    try:
+        file_obj.seek(start)
+        remaining = length
+        while remaining > 0:
+            part = file_obj.read(min(chunk_size, remaining))
+            if not part:
+                break
+            remaining -= len(part)
+            yield part
+    finally:
+        file_obj.close()
+
+
+def parse_byte_range(header, size):
+    """Une seule plage RFC 7233 : complète, ouverte ou suffixe ; jamais multipart."""
+    match = re.fullmatch(r'bytes=(\d{0,18})-(\d{0,18})', header.strip())
+    if not match or (not match.group(1) and not match.group(2)) or size <= 0:
+        return None
+    first, last = match.groups()
+    if not first:
+        length = int(last)
+        if length <= 0:
+            return None
+        start, end = max(0, size - length), size - 1
+    else:
+        start = int(first)
+        end = min(int(last), size - 1) if last else size - 1
+        if start >= size or end < start:
+            return None
+    return start, end
+
+
 class MediaFileAPIView(APIView):
     permission_classes = [StudioPermissions]
     required_permission = 'media_studio.view_mediaasset'
@@ -92,9 +127,33 @@ class MediaFileAPIView(APIView):
         try:
             obj = get_object_or_404(MediaAsset, pk=pk)
             file = obj.fichier.open('rb')
-            response = FileResponse(file, content_type=obj.mime_type, as_attachment=False)
+            size = obj.fichier.size
+            file_name = f'media-{obj.pk}{Path(obj.fichier.name).suffix}'
+            range_header = request.headers.get('Range')
+
+            if range_header:
+                byte_range = parse_byte_range(range_header, size)
+                if byte_range is None:
+                    file.close()
+                    response = HttpResponse(status=416)
+                    response['Content-Range'] = f'bytes */{size}'
+                else:
+                    start, end = byte_range
+                    response = StreamingHttpResponse(
+                        stream_range(file, start, end - start + 1),
+                        status=206,
+                        content_type=obj.mime_type,
+                    )
+                    response['Content-Range'] = f'bytes {start}-{end}/{size}'
+                    response['Content-Length'] = str(end - start + 1)
+            else:
+                response = FileResponse(file, content_type=obj.mime_type, as_attachment=False)
+                response['Content-Length'] = str(size)
+
+            response['Accept-Ranges'] = 'bytes'
             response['Cache-Control'] = 'private, no-store'
-            response['Content-Disposition'] = f'inline; filename="media-{obj.pk}{Path(obj.fichier.name).suffix}"'
+            response['X-Content-Type-Options'] = 'nosniff'
+            response['Content-Disposition'] = f'inline; filename="{file_name}"'
             return response
         except Exception as exc:
             if isinstance(exc, Http404):
@@ -125,6 +184,52 @@ class MediaUploadAPIView(APIView):
         except (serializers.ValidationError, DjangoValidationError) as exc:
             return invalid(exc)
         except Exception as exc:
+            return failed(exc)
+
+
+class MediaUpdateAPIView(APIView):
+    """Edition JSON des métadonnées ; aucun remplacement du fichier ici."""
+    permission_classes = [StudioPermissions]
+    required_permission = 'media_studio.change_mediaasset'
+
+    @docs.media_update_doc
+    def patch(self, request, pk):
+        try:
+            forbidden = set(request.data) - {'titre', 'licence', 'langue'}
+            if forbidden:
+                return error(400, 'BAD_REQUEST', 'Seules les métadonnées peuvent être modifiées',
+                             fields={name: ['Champ non modifiable'] for name in sorted(forbidden)})
+            inp = MediaMetadataInput(data=request.data, partial=True)
+            inp.is_valid(raise_exception=True)
+            patch = inp.validated_data
+            if not patch:
+                return error(400, 'BAD_REQUEST', 'Aucune modification fournie')
+            with transaction.atomic():
+                obj = get_object_or_404(MediaAsset.objects.select_for_update(), pk=pk)
+                fields = []
+                for name in ('titre', 'licence'):
+                    if name in patch:
+                        setattr(obj, name, patch[name])
+                        fields.append(name)
+                if 'langue' in patch:
+                    code = patch['langue']
+                    language = None
+                    if code:
+                        language = Langue.objects.filter(code=code, actif=True).first()
+                        if language is None:
+                            return error(400, 'BAD_REQUEST', 'Langue invalide', fields={'langue': ['Choisir fr ou mg']})
+                    obj.langue = language
+                    fields.append('langue')
+                obj.full_clean()
+                obj.save(update_fields=[*fields, 'updated_at'])
+            return Response(MediaAssetSerializer(obj, context={'request': request}).data)
+        except (serializers.ValidationError, DjangoValidationError) as exc:
+            return invalid(exc)
+        except IntegrityError:
+            return conflict()
+        except Exception as exc:
+            if isinstance(exc, Http404):
+                return error(404, 'NOT_FOUND', 'Média introuvable')
             return failed(exc)
 
 
