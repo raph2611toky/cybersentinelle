@@ -31,13 +31,18 @@ class VoiceSerializer(ValidatedModelSerializer):
 class SceneSerializer(ValidatedModelSerializer):
     video_finale_url = serializers.SerializerMethodField()
     audio_finale_url = serializers.SerializerMethodField()
+    audio_source_url = serializers.SerializerMethodField()
+    video_source_url = serializers.SerializerMethodField()
+    image_source_url = serializers.SerializerMethodField()
+    audio_embedded = serializers.SerializerMethodField()
 
     class Meta:
         model = SceneMedia
         fields = ('id', 'noeud', 'langue', 'mode', 'image', 'video', 'audio', 'sous_titres',
                   'video_finale', 'video_finale_url', 'audio_finale', 'audio_finale_url',
+                  'video_source_url', 'image_source_url', 'audio_source_url', 'audio_embedded',
                   'sync_mode', 'audio_trim_start_ms', 'audio_trim_end_ms', 'narration_texte', 'voix', 'statut', 'created_at', 'updated_at')
-        read_only_fields = ('id', 'video_finale', 'video_finale_url', 'audio_finale', 'audio_finale_url', 'statut', 'created_at', 'updated_at')
+        read_only_fields = ('id', 'video_finale', 'video_finale_url', 'audio_finale', 'audio_finale_url', 'video_source_url', 'image_source_url', 'audio_source_url', 'audio_embedded', 'statut', 'created_at', 'updated_at')
 
     def get_video_finale_url(self, obj):
         request = self.context.get('request')
@@ -52,6 +57,27 @@ class SceneSerializer(ValidatedModelSerializer):
         request = self.context.get('request')
         path = reverse('studio-media-download', kwargs={'pk': obj.audio_finale_id})
         return request.build_absolute_uri(path) if request else path
+
+    def _asset_url(self, asset_id):
+        if not asset_id:
+            return None
+        path = reverse('studio-media-download', kwargs={'pk': asset_id})
+        request = self.context.get('request')
+        return request.build_absolute_uri(path) if request else path
+
+    def get_audio_source_url(self, obj):
+        return self._asset_url(obj.audio_id)
+
+    def get_video_source_url(self, obj):
+        return self._asset_url(obj.video_id)
+
+    def get_image_source_url(self, obj):
+        return self._asset_url(obj.image_id)
+
+    def get_audio_embedded(self, obj):
+        # Le fichier final FFmpeg contient la narration AAC, pas un second lecteur.
+        return bool(obj.video_finale_id and obj.statut == SceneMedia.Status.READY
+                    and obj.mode in {SceneMedia.Mode.VIDEO_AUDIO, SceneMedia.Mode.IMAGE_AUDIO})
 
     def validate(self, attrs):
         # Les scènes ET les fins peuvent avoir une vidéo, jamais les décisions.

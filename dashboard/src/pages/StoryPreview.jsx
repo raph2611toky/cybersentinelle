@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
-import { ArrowLeft, CheckCircle2, Film, GitBranch, Play, RotateCcw, AlertCircle } from 'lucide-react';
+import { ArrowLeft, CheckCircle2, GitBranch, RotateCcw, AlertCircle } from 'lucide-react';
 import { useAdmin } from '../lib/store';
 import { storyApi } from '../services/editor';
 import api, { apiError } from '../services/api';
+import ScenePlayback from '../components/ScenePlayback';
 
 /** A media asset's public/staff endpoint may be emitted with an internal container hostname.
  *  Only accept known same-origin URL paths; never navigate to arbitrary storage hosts. */
@@ -55,7 +56,6 @@ export default function StoryPreview() {
   const [current, setCurrent] = useState('start');
   const [feedback, setFeedback] = useState(null);
   const [visited, setVisited] = useState([]);
-  const [mediaError, setMediaError] = useState(false);
   const graph = useMemo(() => payload ? (mode === 'published' ? toPublishedGraph(payload) : toStoryGraph(payload)) : null, [payload, mode]);
 
   useEffect(() => {
@@ -77,7 +77,6 @@ export default function StoryPreview() {
     return () => { live = false; };
   }, [story?.id, story?.slug, mode]);
 
-  useEffect(() => { setMediaError(false); }, [current, lang, mode]);
 
   const node = graph?.nodes[current];
   const language = languages.find(l => l.code === lang);
@@ -91,29 +90,39 @@ export default function StoryPreview() {
   const publishedMedia = mode === 'published' ? node?.media?.[lang] : null;
   const isReady = Boolean(draftScene?.statut === 'READY');
   const mediaById = id => media.find(m => String(m.id) === String(id));
-  let video = '', audio = '', image = '', mediaNote = '';
+  let video = '', audio = '', image = '', mediaNote = '', embeddedAudio = false;
   if (mode === 'published') {
     video = safeMediaUrl(publishedMedia?.video_url);
     audio = safeMediaUrl(publishedMedia?.audio_url);
+    embeddedAudio = Boolean(publishedMedia?.audio_embedded && video);
     image = safeMediaUrl(node?.visual_url);
     if (!video && !audio && !image && node?.kind !== 'decision') mediaNote = `Aucun média publié en ${lang.toUpperCase()} pour ce nœud.`;
   } else if (draftScene) {
-    video = safeMediaUrl(isReady ? draftScene.video_finale_url : mediaById(draftScene.video)?.fichier_url);
-    audio = safeMediaUrl(isReady ? draftScene.audio_finale_url : mediaById(draftScene.audio)?.fichier_url);
-    image = safeMediaUrl(mediaById(draftScene.image)?.fichier_url);
-    if (draftScene.mode === 'VIDEO_AUDIO' && !isReady) audio = ''; // Never present two unassembled tracks as a final render.
-    mediaNote = isReady ? 'Rendu final prêt (média privé en prévisualisation).' : 'Brouillon : média source, rendu final encore à préparer.';
+    const finalVideo = isReady ? safeMediaUrl(draftScene.video_finale_url) : '';
+    const finalAudio = isReady ? safeMediaUrl(draftScene.audio_finale_url) : '';
+    const sourceVideo = safeMediaUrl(draftScene.video_source_url || mediaById(draftScene.video)?.fichier_url);
+    const sourceAudio = safeMediaUrl(draftScene.audio_source_url || mediaById(draftScene.audio)?.fichier_url);
+    video = finalVideo || sourceVideo;
+    // Un MP4 final assemblé contient DÉJÀ la voix (ne pas la lire deux fois).
+    embeddedAudio = Boolean(finalVideo && draftScene.audio_embedded);
+    audio = finalVideo ? (embeddedAudio ? '' : finalAudio) : (finalAudio || sourceAudio);
+    image = safeMediaUrl(draftScene.image_source_url || mediaById(draftScene.image)?.fichier_url);
+    mediaNote = finalVideo && embeddedAudio
+      ? 'Vidéo finale : narration française/malgache intégrée au MP4.'
+      : isReady ? 'Rendu audio ou vidéo final prêt.'
+      : (video && audio ? 'Aperçu synchronisé : vidéo et voix séparées. La dernière image reste visible jusqu’à la fin de la narration.'
+      : 'Brouillon : rendu final à préparer pour la publication.');
   } else if (draftAsset && lang === 'fr') {
     if (draftAsset.type === 'VIDEO') video = safeMediaUrl(draftAsset.fichier_url);
     if (draftAsset.type === 'IMAGE') image = safeMediaUrl(draftAsset.fichier_url);
-    mediaNote = 'Média du brouillon : applique l’arbre puis lance un rendu pour la publication.';
+    mediaNote = 'Média du brouillon : applique l’arbre puis lance un rendu pour associer la voix.';
   } else if (node && node.kind !== 'decision') {
     mediaNote = `Pas de média associé à ce nœud en ${lang.toUpperCase()}.`;
   }
   const goTo = id => {if (!id || !graph?.nodes[id]) {setError('Destination de scène introuvable dans cet arbre.');return;}
-    setVisited(p => [...p, current]); setCurrent(id); setFeedback(null); setMediaError(false);};
+    setVisited(p => [...p, current]); setCurrent(id); setFeedback(null);};
   const continueScene = () => goTo(graph?.next(current, 'out'));
-  const restart = () => {setCurrent(graph?.nodes.start ? 'start' : Object.keys(graph?.nodes || {})[0] || '');setFeedback(null);setVisited([]);setMediaError(false);};
+  const restart = () => {setCurrent(graph?.nodes.start ? 'start' : Object.keys(graph?.nodes || {})[0] || '');setFeedback(null);setVisited([]);};
   const options = node?.kind === 'decision' ? node.options || [] : [];
   const ended = node?.kind === 'ending';
   const currentTitle = tr(node?.title, lang) || 'Scène sans titre';
@@ -137,11 +146,9 @@ export default function StoryPreview() {
     {!loading && graph && node && <div className="story-preview-layout">
       <section className="story-preview-stage" aria-label="Lecture du Tantara">
         <div className="story-preview-stage-head"><span>{node.kind === 'decision' ? 'DÉCISION' : node.kind === 'ending' ? 'FIN' : 'SCÈNE'}</span><span>{lang.toUpperCase()}</span></div>
-        {node.kind !== 'decision' && <div className="story-preview-screen" key={`${current}-${lang}`}>
-          {!mediaError && video ? <video src={video} controls autoPlay playsInline preload="metadata" onEnded={node.kind === 'scene' ? continueScene : undefined} onError={() => setMediaError(true)} />
-            : !mediaError && image ? <img src={image} alt={currentTitle} onError={() => setMediaError(true)}/>
-            : <div className="story-preview-placeholder"><Film size={40}/><span>{mediaError ? 'Média impossible à charger' : 'Scène sans image ou vidéo disponible'}</span></div>}
-          {!mediaError && !video && audio && <audio src={audio} controls autoPlay onEnded={node.kind === 'scene' ? continueScene : undefined} />}
+        {node.kind !== 'decision' && <div className="story-preview-screen" key={`${current}-${lang}-${video}-${audio}`}>
+          <ScenePlayback video={video} audio={audio} image={image} embeddedAudio={embeddedAudio}
+            title={currentTitle} onFinished={node.kind === 'scene' ? continueScene : undefined} />
         </div>}
         {node.kind === 'decision' && <div className="story-preview-decision-banner"><GitBranch size={32}/><strong>À toi de choisir</strong><span>Ta décision déterminera la suite de l'histoire.</span></div>}
         <div className="story-preview-copy"><h2>{currentTitle}</h2><p>{currentText}</p></div>

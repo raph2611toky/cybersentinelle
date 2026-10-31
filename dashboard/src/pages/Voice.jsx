@@ -5,6 +5,7 @@ import { Dialog, Field, Panel, StatCard } from '../components/UI';
 import { useAdmin } from '../lib/store';
 import { studioApi } from '../services/editor';
 import { apiError } from '../services/api';
+import ScenePlayback from '../components/ScenePlayback';
 
 export default function Voice() {
   const { voices, scenes, jobs, languages, nodes, stories, media, perform, refresh, busy } = useAdmin();
@@ -12,6 +13,7 @@ export default function Voice() {
   const [text,setText] = useState('Tu peux demander de l’aide à une personne de confiance.');
   const [playing,setPlaying] = useState(false);
   const [dialog,setDialog] = useState(null);
+  const [previewSceneId,setPreviewSceneId] = useState(null);
   const [error,setError] = useState('');
   const [catalog,setCatalog] = useState([]);
   const [catalogBusy,setCatalogBusy] = useState(false);
@@ -23,6 +25,7 @@ export default function Voice() {
   const [uploadBusy,setUploadBusy] = useState(false);
   const [targetSpeed,setTargetSpeed] = useState('1');
   const [synth,setSynth] = useState({scene:'',langue:'fr',voix:'',texte:''});
+  const mediaById = (id) => media.find(m=>String(m.id)===String(id));
   const currentVideo = media.find(m=>m.id===sceneForm.video);
   const currentAudio = media.find(m=>m.id===sceneForm.audio);
   const videoMs = currentVideo?.duree_ms ? Math.ceil(currentVideo.duree_ms / 40) * 40 : 0;
@@ -182,9 +185,17 @@ export default function Voice() {
       <span className="muted">Un nœud narratif peut avoir deux montages distincts (FR et MG). « DRAFT » signifie que le média n'est pas encore finalisé ; « READY » indique un rendu prêt. Les décisions ne nécessitent pas de média.</span>
     </div></Panel>
     <Panel title="Scènes et rendus" icon={AudioLines}><div className="resource-list">
-      {scenes.map(s=><div className="resource-list-row" key={s.id}><span className="resource-list-icon"><AudioLines size={18}/></span><span className="resource-list-main"><strong>{nodes.find(n=>n.id===s.noeud)?.titre_fr||s.noeud}</strong><small>{s.mode} · {languages.find(l=>l.id===s.langue)?.code||s.langue} · {s.statut}</small></span><div className="table-actions"><button className="btn btn-outline" disabled={busy} onClick={()=>editScene(s)}>Modifier</button>
+      {scenes.map(s=><div className="resource-list-row studio-preview-row" key={s.id}><span className="resource-list-icon"><AudioLines size={18}/></span><span className="resource-list-main"><strong>{nodes.find(n=>n.id===s.noeud)?.titre_fr||s.noeud}</strong><small>{s.mode} · {languages.find(l=>l.id===s.langue)?.code||s.langue} · {s.statut}</small></span><div className="table-actions"><button className="btn btn-outline" disabled={busy} onClick={()=>editScene(s)}>Modifier</button>
       <button disabled={s.mode==='TEXT_ONLY'||busy} className="btn btn-outline" onClick={()=>render(s.id)}>{s.mode==='AUDIO_ONLY'?'Finaliser la voix':'Assembler'}</button>
-      {(s.audio_finale_url||s.video_finale_url)&&<a className="btn btn-outline" href={s.audio_finale_url||s.video_finale_url} target="_blank" rel="noopener noreferrer">Écouter / Voir</a>}</div></div>)}
+      <button type="button" className="btn btn-outline" onClick={()=>setPreviewSceneId(p=>p===s.id?null:s.id)}>{previewSceneId===s.id?'Fermer l’aperçu':'Écouter / Voir'}</button></div>
+      {previewSceneId===s.id&&<div className="studio-scene-preview">
+        <strong>Aperçu de la scène · {languages.find(l=>l.id===s.langue)?.code?.toUpperCase()}</strong>
+        <ScenePlayback key={`${s.id}-${s.updated_at}`} title={nodes.find(n=>n.id===s.noeud)?.titre_fr || 'Scène'}
+          video={s.statut==='READY' && s.video_finale_url ? s.video_finale_url : s.video_source_url || mediaById(s.video)?.fichier_url || ''}
+          audio={s.statut==='READY' && s.video_finale_url && s.audio_embedded ? '' : (s.audio_finale_url || s.audio_source_url || mediaById(s.audio)?.fichier_url || '')}
+          image={s.image_source_url || mediaById(s.image)?.fichier_url || ''}
+          embeddedAudio={s.statut==='READY' && s.audio_embedded}/>
+      </div>}</div>)}
       {!scenes.length&&<div className="empty-state">Les nœuds narratifs s'affichent au-dessus après application de l'arbre. Associe leur média ou prépare un montage.</div>}
     </div></Panel>
     <Panel title="Traitements récents" icon={FileAudio}><div className="resource-list">{jobs.slice(0,20).map(j=><div className="resource-list-row" key={j.id}><span className="resource-list-icon"><WandSparkles size={18}/></span><span className="resource-list-main"><strong>{j.type} · {j.statut}</strong><small>{j.code_erreur||'Traitement du studio'} · {j.created_at?.slice(0,16)}</small></span>{j.resultat_url&&<span className="muted">Fichier prêt dans la médiathèque</span>}</div>)}</div></Panel>

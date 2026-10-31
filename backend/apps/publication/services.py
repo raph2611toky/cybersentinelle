@@ -237,7 +237,7 @@ def publication_payload():
                     raise ValidationError(f'{story.slug}:{scene.noeud.cle}: audio non validé')
                 if not asset.fichier or not asset.fichier.storage.exists(asset.fichier.name):
                     raise ValidationError(f'{story.slug}:{scene.noeud.cle}: voix introuvable')
-                info = {'mode': 'audio', 'audio_path': f'media/{asset.pk}.mp3'}
+                info = {'mode': 'audio', 'audio_path': f'media/{asset.pk}.mp3', 'audio_embedded': False}
             else:
                 if scene.statut != SceneMedia.Status.READY or not scene.video_finale_id:
                     raise ValidationError(f'{story.slug}:{scene.noeud.cle}/{scene.langue.code}: rendu vidéo absent')
@@ -246,7 +246,8 @@ def publication_payload():
                     raise ValidationError(f'{story.slug}:{scene.noeud.cle}: média non validé')
                 if not media_asset.fichier or not media_asset.fichier.storage.exists(media_asset.fichier.name):
                     raise ValidationError(f'{story.slug}:{scene.noeud.cle}: clip introuvable')
-                info = {'mode': 'video', 'video_path': f'media/{media_asset.pk}.mp4'}
+                info = {'mode': 'video', 'video_path': f'media/{media_asset.pk}.mp4',
+                        'audio_embedded': scene.mode in {SceneMedia.Mode.VIDEO_AUDIO, SceneMedia.Mode.IMAGE_AUDIO}}
             if scene.sous_titres_id:
                 subtitle = scene.sous_titres
                 if subtitle.type != MediaAsset.Kind.SUBTITLE or not subtitle.droits_confirmes:
