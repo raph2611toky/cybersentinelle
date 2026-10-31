@@ -2,6 +2,7 @@ from django.urls import path
 from . import views
 
 urlpatterns = [
+    path('stories/<uuid:pk>/prepare-audio/', views.PrepareStoryAudioAPIView.as_view(), name='studio-prepare-story-audio'),
     path('media/', views.MediaListAPIView.as_view(), name='studio-media-list'),
     path('media/upload/', views.MediaUploadAPIView.as_view(), name='studio-media-upload'),
     path('media/<uuid:pk>/', views.MediaDetailAPIView.as_view(), name='studio-media-detail'),

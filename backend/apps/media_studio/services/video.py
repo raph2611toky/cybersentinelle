@@ -235,3 +235,13 @@ def render_scene(scene):
               '-movflags', '+faststart', str(output)])
         _check_final(output, target, audio=mode != SceneMedia.Mode.VIDEO_ORIGINAL)
         return _validate_result(output)
+
+
+def extract_narration(video_bytes):
+    with tempfile.TemporaryDirectory(prefix='safidiko-track-') as tmp:
+        source = Path(tmp) / 'clip.mp4'
+        source.write_bytes(video_bytes)
+        output = Path(tmp) / 'track.mp3'
+        _run(['ffmpeg', '-nostdin', '-hide_banner', '-loglevel', 'error', '-y',
+              '-i', str(source), '-map', '0:a:0', '-vn', '-c:a', 'libmp3lame', '-b:a', '160k', str(output)])
+        return _validate_result(output)

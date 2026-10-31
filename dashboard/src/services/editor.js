@@ -38,6 +38,8 @@ export const resourceApi = {
 };
 
 export const studioApi = {
+  confirmRights: (id,licence) => api.post(`${studio}/media/${id}/rights-confirm/`, {licence}),
+  prepareAudio: id => api.post(`${studio}/stories/${id}/prepare-audio/`, {}),
   media: () => allPages(`${studio}/media/`),
   upload: form => api.post(`${studio}/media/upload/`, form, { timeout: 120000 }),
   deleteMedia: id => api.delete(`${studio}/media/${id}/delete/`),

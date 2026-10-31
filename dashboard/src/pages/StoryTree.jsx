@@ -14,9 +14,18 @@ import { storyApi, studioApi, translationApi } from '../services/editor';
 import { newGraph } from '../data/seed';
 import { apiError } from '../services/api';
 
+const branchColors = ['#38bdf8','#fbbf24','#c084fc'];
 const nodeTypes = { story: StoryNode };
 
 function StoryNode({ data, selected }) {
+  const routingRef=useRef(null);
+  const [wireLayout,setWireLayout]=useState({width:1,height:1,rows:[]});
+  useEffect(()=>{
+    const element=routingRef.current;if(!element)return;
+    const measure=()=>setWireLayout({width:element.offsetWidth,height:element.offsetHeight,
+      rows:Array.from(element.querySelectorAll('.flow-option')).map(row=>row.offsetTop+row.offsetHeight/2)});
+    measure();const observer=new ResizeObserver(measure);observer.observe(element);return()=>observer.disconnect();
+  },[data.options]);
   const icon = data.kind === 'decision' ? <GitBranch size={17}/> : data.kind === 'ending' ? <Flag size={17}/> : <BookOpen size={17}/>;
   return <div className={`flow-node flow-${data.kind} ${selected ? 'flow-selected' : ''}`}>
     <Handle type="target" position={Position.Top} id="in" />
@@ -24,11 +33,10 @@ function StoryNode({ data, selected }) {
     <strong>{data.title?.fr || 'Sans titre'}</strong>
     <small>{data.text?.fr || 'Cliquer pour modifier'}</small>
     {data.kind === 'decision'
-      ? <div className="flow-options">{(data.options || []).map((option, index, options) => <div key={option.id} className="flow-option">
-        {option.label?.fr || 'Choix'}
-        <Handle type="source" id={option.id} position={Position.Bottom}
-          style={{ left: `${12 + Math.round((index + 1) * 76 / (options.length + 1))}%`, bottom: -6 }}/>
-      </div>)}</div>
+      ? <div className="decision-routing" ref={routingRef}>{(data.options || []).map((option, index) => <div key={option.id} className="flow-option" style={{borderLeft:`3px solid ${branchColors[index]}`}}><span style={{color:branchColors[index]}}>{index+1} · </span>{option.label?.fr || 'Choix'}</div>)}
+        <svg className="decision-wires" viewBox={`0 0 ${wireLayout.width} ${wireLayout.height}`} preserveAspectRatio="none" aria-hidden="true">{(data.options||[]).map((o,i,all)=>{const w=wireLayout.width,h=wireLayout.height,x=(i+1)*w/(all.length+1),y=wireLayout.rows[i]||0,lane=w-5-i*7,turn=h-18-i*12;return <path key={o.id} d={`M ${w-36} ${y} H ${lane} V ${turn} H ${x} V ${h}`} fill="none" stroke={branchColors[i]} strokeWidth="2"/>})}</svg>
+        {(data.options||[]).map((o,i,all)=><Handle key={o.id} type="source" id={o.id} position={Position.Bottom} title={`Choix ${i+1} : ${o.label?.fr}`} style={{left:`${(i+1)*100/(all.length+1)}%`,bottom:-6,background:branchColors[i]}}/>)}
+      </div>
       : data.kind === 'scene' && <Handle type="source" position={Position.Bottom} id="out" />}
   </div>;
 }
@@ -83,6 +91,8 @@ export default function StoryTree() {
   const [nodeIdMap, setNodeIdMap] = useState({});
   const [selectedId, setSelectedId] = useState(null);
   const [selectedEdgeId, setSelectedEdgeId] = useState(null);
+  const [edgeMenu,setEdgeMenu]=useState(null);
+  useEffect(()=>{const close=()=>setEdgeMenu(null);window.addEventListener('click',close);window.addEventListener('keydown',close);return()=>{window.removeEventListener('click',close);window.removeEventListener('keydown',close)}},[]);
   const [videoLang, setVideoLang] = useState('fr');
   const [videoId, setVideoId] = useState('');
   const [uploadFile, setUploadFile] = useState(null);
@@ -134,11 +144,11 @@ export default function StoryTree() {
   })), [nodes, nodeIdMap, scenes]);
   const flowEdges = useMemo(() => edges.map(e => ({
     ...e, interactionWidth: 25,
-    style: { stroke: e.id === selectedEdgeId ? '#c9a3ff' : '#40aefc', strokeWidth: e.id === selectedEdgeId ? 3.4 : 1.8 },
-  })), [edges, selectedEdgeId]);
+    style: { stroke: e.id === selectedEdgeId ? '#fff' : branchColors[nodes.find(n=>n.id===e.source)?.data.options?.findIndex(o=>o.id===e.sourceHandle)] || '#40aefc', strokeWidth: e.id === selectedEdgeId ? 3.4 : 1.8 },
+  })), [edges, selectedEdgeId, nodes]);
 
   useEffect(() => { setVideoId(existingSceneMedia?.video || ''); closePreview(); }, [selectedId, videoLang, existingSceneMedia?.id, existingSceneMedia?.video, closePreview]);
-  useEffect(() => { if (selectedEdgeId && !edges.some(e => e.id === selectedEdgeId)) setSelectedEdgeId(null); }, [edges, selectedEdgeId]);
+  useEffect(() => { if (selectedEdgeId && !edges.some(e => e.id === selectedEdgeId)) setSelectedEdgeId(null); }, [edges, selectedEdgeId, nodes]);
 
   const onNodesChange = useCallback(changes => {
     setNodes(old => applyNodeChanges(changes, old));
@@ -166,6 +176,7 @@ export default function StoryTree() {
     setSelectedEdgeId(null); setDirty(true); setMessage('');
   }, [isValidConnection]);
   const deleteLink = () => {
+    setEdgeMenu(null);
     if (!selectedEdgeId) return;
     setEdges(old => old.filter(e => e.id !== selectedEdgeId));
     setSelectedEdgeId(null); setDirty(true);
@@ -288,6 +299,7 @@ export default function StoryTree() {
 
   if (!story) return <Panel title="Aucun Tantara"><p>Créez d’abord une histoire.</p></Panel>;
   return <div className="page-stack">
+    {edgeMenu&&<div role="menu" className="edge-context-menu" style={{left:edgeMenu.x,top:edgeMenu.y}}><button role="menuitem" className="btn btn-danger" onClick={deleteLink}><Link2Off size={16}/> Supprimer le lien</button></div>}
     {message && <div role="status" className="api-banner">{message}</div>}
     <div className="tree-bar">
       <div className="inline-fields"><Field label="Histoire"><select value={story.id} onChange={e => {if (dirty && !confirm('Abandonner les changements non enregistrés ?')) return;setParams({story:e.target.value});}}>{stories.map(s => <option value={s.id} key={s.id}>{s.title}</option>)}</select></Field><span className="subtle-vertical"/><span className="tree-counter">{nodes.length} nœuds · {edges.length} liaisons · {translation.state === 'PENDING' ? `MG en file (${translation.pending})` : translation.state === 'FAILED' ? 'MG en erreur' : translation.state === 'REVIEW_REQUIRED' ? 'MG à relire' : 'FR → MG automatique'}</span></div>
@@ -305,6 +317,7 @@ export default function StoryTree() {
           nodes={flowNodes} edges={flowEdges} nodeTypes={nodeTypes}
           onNodesChange={onNodesChange} onEdgesChange={onEdgesChange}
           onConnect={onConnect} isValidConnection={isValidConnection}
+          onEdgeContextMenu={(event,edge)=>{event.preventDefault();setSelectedEdgeId(edge.id);setSelectedId(null);setEdgeMenu({x:Math.min(event.clientX,window.innerWidth-220),y:Math.min(event.clientY,window.innerHeight-70)})}}
           onEdgeClick={(_, edge) => {setSelectedEdgeId(edge.id);setSelectedId(null);}}
           onNodeClick={(_, node) => {setSelectedId(node.id);setSelectedEdgeId(null);}}
           onPaneClick={() => {setSelectedId(null);setSelectedEdgeId(null);}}

@@ -8,6 +8,8 @@ public_media_doc = swagger_auto_schema(
     produces=['video/mp4', 'audio/mpeg'],
     responses={
         200: openapi.Response('Flux MP4 vidéo ou MP3 audio publié (aucun corps JSON)'),
+        206: openapi.Response('Plage de lecture partielle'),
+        416: openapi.Response('Plage invalide, corps vide'),
         **ERROR_RESPONSES,
         503: openapi.Response('Publication non disponible', ERROR_RESPONSES[500].schema),
     },

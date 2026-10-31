@@ -152,6 +152,9 @@ def decorate_story_urls(data, manifest, request):
                     lang_data['subtitle_url'] = request.build_absolute_uri(reverse('story-subtitle', kwargs={
                         'version': manifest['version'], 'asset_id': subtitle_id, 'ext': ext,
                     }))
+        node['default_audio_language'] = 'fr'
+        node['audio_tracks'] = {code: ({'url': node['media'][code]['audio_url'], 'language': code}
+            if node.get('media', {}).get(code, {}).get('audio_url') else None) for code in ('fr', 'mg')}
     return data
 
 
@@ -226,7 +229,15 @@ def publication_payload():
         scene_media = SceneMedia.objects.filter(noeud__tantara=story).select_related(
             'noeud', 'langue', 'video_finale', 'audio_finale', 'video', 'audio'
         )
+        by_node = {(scene.noeud_id, scene.langue.code): scene for scene in scene_media}
+        for node in story.noeuds.filter(type__in=['SCENE', 'ENDING']):
+            french = by_node.get((node.pk, 'fr'))
+            if not french or not french.audio_finale_id or french.statut != SceneMedia.Status.READY:
+                raise ValidationError(f'{story.slug}:{node.cle}: piste française finalisée obligatoire ; préparer les voix puis rendre la scène')
         for scene in scene_media:
+            # An absent/empty Malagasy draft is optional; a configured track must be valid.
+            if scene.langue.code == 'mg' and not scene.audio_id and not scene.narration_texte.strip():
+                continue
             if scene.mode == SceneMedia.Mode.TEXT_ONLY:
                 info = {'mode': 'text'}
             elif scene.mode == SceneMedia.Mode.AUDIO_ONLY:
@@ -248,6 +259,11 @@ def publication_payload():
                     raise ValidationError(f'{story.slug}:{scene.noeud.cle}: clip introuvable')
                 info = {'mode': 'video', 'video_path': f'media/{media_asset.pk}.mp4',
                         'audio_embedded': scene.mode in {SceneMedia.Mode.VIDEO_AUDIO, SceneMedia.Mode.IMAGE_AUDIO}}
+            if scene.audio_finale_id:
+                track = scene.audio_finale
+                if not track.droits_confirmes or not track.fichier or not track.fichier.storage.exists(track.fichier.name):
+                    raise ValidationError(f'{story.slug}:{scene.noeud.cle}: piste audio non validée ou absente')
+                info['audio_path'] = f'media/{track.pk}.mp3'
             if scene.sous_titres_id:
                 subtitle = scene.sous_titres
                 if subtitle.type != MediaAsset.Kind.SUBTITLE or not subtitle.droits_confirmes:

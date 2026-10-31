@@ -8,7 +8,7 @@ from celery import shared_task
 from .models import GenerationJob, MediaAsset, SceneMedia
 from .providers.tts import synthesize, ProviderError
 from .services.media import persist_generated, persist_upload
-from .services.video import render_scene, render_audio_only, RenderError
+from .services.video import render_scene, render_audio_only, extract_narration, RenderError
 
 LOG = logging.getLogger('safidiko')
 
@@ -67,6 +67,13 @@ def process_studio_job(job_id):
             else:
                 scene.video_finale = asset
                 scene.audio_finale = None
+                if scene.mode in {SceneMedia.Mode.VIDEO_AUDIO, SceneMedia.Mode.IMAGE_AUDIO}:
+                    scene.audio_finale = persist_upload(
+                        ContentFile(extract_narration(payload), name='narration.mp3'), MediaAsset.Kind.AUDIO,
+                        title=f'Piste {scene.noeud.cle} {scene.langue.code}',
+                        licence='Piste synchronisée du montage', langue=scene.langue,
+                        origin=MediaAsset.Origin.RENDER,
+                        rights_confirmed=all(x.droits_confirmes for x in used_media if x))
             scene.statut = SceneMedia.Status.READY
             scene.full_clean()
             scene.save(update_fields=['video_finale', 'audio_finale', 'statut', 'updated_at'])

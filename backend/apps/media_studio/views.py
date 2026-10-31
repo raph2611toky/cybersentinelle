@@ -22,6 +22,7 @@ from .serializers import (MediaAssetSerializer, MediaUploadInput, MediaMetadataI
 from .services.media import persist_upload
 from .providers.tts import list_provider_voices, ProviderError
 from .tasks import process_studio_job
+from .auto_audio import dispatch
 from . import swagger as docs
 
 LOG = logging.getLogger('safidiko')
@@ -294,6 +295,7 @@ class SceneCreateAPIView(APIView):
     required_permission = 'media_studio.add_scenemedia'
 
     @docs.scene_create_doc
+    @transaction.atomic
     def post(self, request):
         try:
             s = SceneSerializer(data=request.data, context={'request': request})
@@ -313,9 +315,10 @@ class ScenePatchAPIView(APIView):
     required_permission = 'media_studio.change_scenemedia'
 
     @docs.scene_patch_doc
+    @transaction.atomic
     def patch(self, request, pk):
         try:
-            obj = get_object_or_404(SceneMedia, pk=pk)
+            obj = get_object_or_404(SceneMedia.objects.select_for_update(), pk=pk)
             if obj.jobs.filter(statut__in=['PENDING', 'RUNNING']).exists():
                 return conflict()
             s = SceneSerializer(obj, data=request.data, partial=True, context={'request': request})
@@ -388,6 +391,7 @@ class TTSCreateAPIView(APIView):
     required_permission = 'media_studio.add_generationjob'
 
     @docs.tts_doc
+    @transaction.atomic
     def post(self, request):
         try:
             s = TTSInput(data=request.data)
@@ -397,7 +401,7 @@ class TTSCreateAPIView(APIView):
             if GenerationJob.objects.filter(type='TTS', created_at__date=today).count() >= settings.STUDIO_TTS_DAILY_LIMIT:
                 return error(429, 'TTS_DAILY_LIMIT', 'Limite quotidienne de synthèse vocale atteinte')
             job = GenerationJob.objects.create(type='TTS', scene=d['scene'], voix=d['voix'], texte=d['texte'])
-            enqueue(job)
+            transaction.on_commit(lambda: dispatch(job.pk))
             return Response(JobSerializer(job, context={'request': request}).data, status=202)
         except StudioQueueUnavailable:
             return error(503, 'QUEUE_UNAVAILABLE', 'File de traitements indisponible')
@@ -412,9 +416,10 @@ class RenderCreateAPIView(APIView):
     required_permission = 'media_studio.add_generationjob'
 
     @docs.render_doc
+    @transaction.atomic
     def post(self, request, pk):
         try:
-            scene = get_object_or_404(SceneMedia, pk=pk)
+            scene = get_object_or_404(SceneMedia.objects.select_for_update(), pk=pk)
             if scene.mode == SceneMedia.Mode.TEXT_ONLY:
                 return error(400, 'BAD_REQUEST', 'Aucun média à assembler')
             if scene.mode in {SceneMedia.Mode.IMAGE_AUDIO, SceneMedia.Mode.VIDEO_AUDIO, SceneMedia.Mode.AUDIO_ONLY} and not scene.audio_id:
@@ -426,7 +431,7 @@ class RenderCreateAPIView(APIView):
             job = GenerationJob.objects.create(type='RENDER', scene=scene)
             scene.statut = SceneMedia.Status.PROCESSING
             scene.save(update_fields=['statut', 'updated_at'])
-            enqueue(job)
+            transaction.on_commit(lambda: dispatch(job.pk))
             return Response(JobSerializer(job, context={'request': request}).data, status=202)
         except StudioQueueUnavailable:
             return error(503, 'QUEUE_UNAVAILABLE', 'File de traitements indisponible')
@@ -580,7 +585,7 @@ class DialogueTTSCreateAPIView(APIView):
                 return conflict()
             job = GenerationJob.objects.create(type='TTS', scene=dialogue.scene, dialogue=dialogue,
                 voix=dialogue.voix, texte=dialogue.texte)
-            enqueue(job)
+            transaction.on_commit(lambda: dispatch(job.pk))
             return Response(JobSerializer(job, context={'request': request}).data, status=202)
         except StudioQueueUnavailable:
             return error(503, 'QUEUE_UNAVAILABLE', 'File de traitements indisponible')
@@ -663,4 +668,25 @@ class SceneDeleteAPIView(APIView):
         except Exception as exc:
             if isinstance(exc, Http404):
                 return error(404, 'NOT_FOUND', 'Scène introuvable')
+            return failed(exc)
+
+
+class PrepareStoryAudioAPIView(APIView):
+    permission_classes = [StudioPermissions]
+    required_permission = 'media_studio.add_generationjob'
+
+    @docs.prepare_story_audio_doc
+    def post(self, request, pk):
+        try:
+            from apps.content_api.models import Tantara
+            from .auto_audio import ensure_node_audio
+            story = get_object_or_404(Tantara, pk=pk)
+            results = []
+            for node in story.noeuds.filter(type__in=['SCENE', 'ENDING']):
+                reason = ensure_node_audio(node.pk)
+                results.append({'node': str(node.pk), 'error': reason})
+            return Response({'results': results}, status=202)
+        except Exception as exc:
+            if isinstance(exc, Http404):
+                return error(404, 'NOT_FOUND', 'Tantara introuvable')
             return failed(exc)

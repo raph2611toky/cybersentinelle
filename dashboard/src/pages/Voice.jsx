@@ -9,6 +9,9 @@ import ScenePlayback from '../components/ScenePlayback';
 
 export default function Voice() {
   const { voices, scenes, jobs, languages, nodes, stories, media, perform, refresh, busy } = useAdmin();
+  const [storyId,setStoryId]=useState('');
+  const activeStoryId=storyId || stories[0]?.id || '';
+  const [trackOnly,setTrackOnly]=useState(false);
   const [lang,setLang] = useState('fr');
   const [text,setText] = useState('Tu peux demander de l’aide à une personne de confiance.');
   const [playing,setPlaying] = useState(false);
@@ -42,13 +45,14 @@ export default function Voice() {
   const supported = typeof window !== 'undefined' && 'speechSynthesis' in window;
   const availableNodes = useMemo(() => nodes.filter(n => ['SCENE','ENDING'].includes(n.type)),[nodes]);
   const uniqueMediaNodes = useMemo(() => new Set(scenes.map(s => String(s.noeud))).size, [scenes]);
-  const storyNodes = useMemo(() => stories.map(story => ({ story, items: nodes.filter(n => String(n.tantara) === String(story.id)) })).filter(g => g.items.length), [stories, nodes]);
+  const storyNodes = useMemo(() => stories.filter(story=>String(story.id)===String(activeStoryId)).map(story => ({ story, items: nodes.filter(n => String(n.tantara) === String(story.id)) })).filter(g => g.items.length), [stories, nodes, activeStoryId]);
   const nodeScene = (nodeId, code) => { const id = languages.find(l => l.code === code)?.id; return scenes.find(s => String(s.noeud) === String(nodeId) && String(s.langue) === String(id)); };
-  const openNodeForLanguage = (node, code) => { const l = languages.find(item => item.code === code); if (!l) return; setError(''); setAudioUpload({file:null,title:'',licence:'',rights:false}); setSceneForm({...blankScene(), noeud:node.id, langue:l.id}); setDialog('scene'); };
+  const openNodeForLanguage = (node, code) => { const l = languages.find(item => item.code === code); if (!l) return; setError(''); setAudioUpload({file:null,title:'',licence:'',rights:false}); const fr=nodeScene(node.id,'fr');setSceneForm({...blankScene(), noeud:node.id, langue:l.id,video:fr?.video||'',image:fr?.image||'',mode:fr?.video?'VIDEO_AUDIO':fr?.image?'IMAGE_AUDIO':'AUDIO_ONLY',narration_texte:code==='fr'?node.texte_fr||'':'',voix:voices.find(v=>v.actif&&v.langue===l.id)?.id||''}); setDialog('scene'); };
   const chosenScene = scenes.find(s => s.id === synth.scene);
   const voiceLanguage = languages.find(l=>l.id===voiceForm.langue)?.code;
   const selectedLang = languages.find(l => l.code === synth.langue);
   const voiceChoices = voices.filter(v => v.actif && (!chosenScene || v.langue===chosenScene.langue) && (!selectedLang || v.langue===selectedLang.id));
+  useEffect(()=>{if(!jobs.some(j=>['PENDING','RUNNING'].includes(j.statut)))return;const timer=setInterval(()=>refresh(),4000);return()=>clearInterval(timer)},[jobs,refresh]);
   const stop = () => {if(supported) window.speechSynthesis.cancel();setPlaying(false)};
   useEffect(() => () => {if(supported) window.speechSynthesis.cancel()},[supported]);
   const preview = () => {if(!supported||!text.trim())return;stop();const u=new SpeechSynthesisUtterance(text.trim());u.lang=lang==='mg'?'mg-MG':'fr-FR';u.rate=.95;u.onend=()=>setPlaying(false);u.onerror=()=>setPlaying(false);setPlaying(true);window.speechSynthesis.speak(u)};
@@ -56,6 +60,7 @@ export default function Voice() {
   const createVoice = e => {e.preventDefault();run(()=>studioApi.createVoice(voiceForm))};
   const createScene = e => {e.preventDefault();
     const d={...sceneForm};
+    if(trackOnly)d.mode=d.video?'VIDEO_AUDIO':d.image?'IMAGE_AUDIO':'AUDIO_ONLY';
     if(d.mode==='TEXT_ONLY') {d.video=null;d.image=null;d.audio=null;}
     else if(d.mode==='AUDIO_ONLY') {d.video=null;d.image=null;}
     else if(d.mode==='IMAGE_AUDIO') {d.video=null;if(!d.audio)d.audio=null;}
@@ -66,9 +71,12 @@ export default function Voice() {
     if(!d.image)d.image=null;
     if(d.audio_trim_end_ms === '')d.audio_trim_end_ms=null;
     if(syncError){setError(syncError);return;}
+    if(trackOnly&&!d.audio&&!d.narration_texte.trim()&&languages.find(l=>l.id===d.langue)?.code==='mg'){setError('Fournis un fichier ou le texte malagasy.');return;}
     run(async()=>{
     const existing=scenes.find(s=>s.noeud===d.noeud&&s.langue===d.langue);
-    return existing ? studioApi.updateScene(existing.id,d) : studioApi.createScene(d);
+    const response=existing ? await studioApi.updateScene(existing.id,d) : await studioApi.createScene(d);
+    if(d.audio)await studioApi.render(response.data.id);
+    return response;
   })};
   const loadVoices = async () => {
     setError('');setCatalog([]);setCatalogNote('');
@@ -83,39 +91,21 @@ export default function Voice() {
   };
   const generate = async e => {
     e.preventDefault();setError('');
-    if(!synth.voix||!synth.texte.trim()||!synth.scene) return;
-    try {
-      await perform(async()=>{
-        let sceneId=synth.scene;
-        let scene=scenes.find(s=>String(s.id)===String(sceneId));
-        if(sceneId.startsWith('node:')) {
-          const nodeId=sceneId.slice(5);
-          const langObj=languages.find(l=>l.code===synth.langue);
-          if(!langObj) throw new Error('Langue indisponible dans le backend.');
-          scene=scenes.find(s=>s.noeud===nodeId&&s.langue===langObj.id);
-          if(!scene){
-            const resp=await studioApi.createScene({noeud:nodeId,langue:langObj.id,mode:'TEXT_ONLY'});
-            scene=resp.data;
-          }
-          sceneId=scene.id;
-        }
-        if(scene.mode==='TEXT_ONLY' && !scene.video && !scene.image) {
-          // La synthèse seule produit un vrai asset AUDIO, sans générer de vidéo noire.
-          await studioApi.updateScene(sceneId,{mode:'AUDIO_ONLY',voix:synth.voix,narration_texte:synth.texte});
-        }
-        if(scene.mode==='VIDEO_ORIGINAL'&&scene.video) {
-          // Générer une narration distincte sans écraser la bande sonore d'origine.
-          await studioApi.updateScene(sceneId,{mode:'VIDEO_AUDIO',voix:synth.voix,narration_texte:synth.texte});
-        }
-        return studioApi.tts({scene:sceneId,voix:synth.voix,texte:synth.texte});
-      });
-    } catch(e){setError(e.message)}
+    try {await perform(async()=>{
+      const nodeId=synth.scene.startsWith('node:')?synth.scene.slice(5):scenes.find(s=>s.id===synth.scene)?.noeud;
+      const language=languages.find(l=>l.code===synth.langue);
+      const existing=nodeScene(nodeId,synth.langue);
+      const base=existing||nodeScene(nodeId,'fr');
+      const data={noeud:nodeId,langue:language.id,voix:synth.voix,narration_texte:synth.texte,audio:null,
+        video:base?.video||null,image:base?.image||null,mode:base?.video?'VIDEO_AUDIO':base?.image?'IMAGE_AUDIO':'AUDIO_ONLY'};
+      return existing?studioApi.updateScene(existing.id,data):studioApi.createScene(data);
+    })}catch(e){setError(e.message)}
   };
   const render=async id=>{if(!confirm('Assembler maintenant la vidéo et la voix avec FFmpeg ?'))return;setError('');try{await perform(()=>studioApi.render(id))}catch(e){setError(e.message)}};
   const openVoice=()=>{setError('');setCatalog([]);setCatalogNote('');setVoiceForm(f=>({...f,langue:f.langue||languages.find(l=>l.code==='fr')?.id||''}));setDialog('voice')};
-  const openScene=()=>{setError('');setAudioUpload({file:null,title:'',licence:'',rights:false});setSceneForm({...blankScene(),langue:languages.find(l=>l.code==='fr')?.id||''});setDialog('scene')};
-  const editScene=(sc)=>{setError('');setAudioUpload({file:null,title:'',licence:'',rights:false});setSceneForm({
-    noeud:sc.noeud,langue:sc.langue,mode:sc.mode,image:sc.image||'',video:sc.video||'',audio:sc.audio||'',
+  const openScene=()=>{setTrackOnly(false);setError('');setAudioUpload({file:null,title:'',licence:'',rights:false});setSceneForm({...blankScene(),langue:languages.find(l=>l.code==='fr')?.id||''});setDialog('scene')};
+  const editScene=(sc, audioOnly=false)=>{setTrackOnly(audioOnly);setError('');setAudioUpload({file:null,title:'',licence:'',rights:false});setSceneForm({
+    noeud:sc.noeud,langue:sc.langue,mode:audioOnly?(sc.video?'VIDEO_AUDIO':sc.image?'IMAGE_AUDIO':'AUDIO_ONLY'):sc.mode,image:sc.image||'',video:sc.video||'',audio:sc.audio||'',
     narration_texte:sc.narration_texte||'',voix:sc.voix||'',sync_mode:sc.sync_mode||'FREEZE_LAST',
     audio_trim_start_ms:sc.audio_trim_start_ms||0,audio_trim_end_ms:sc.audio_trim_end_ms??null,
   });setDialog('scene')};
@@ -174,18 +164,22 @@ export default function Voice() {
       </form></Panel>
     </div>
     <Panel title="Toutes les scènes du Tantara" icon={AudioLines}><div className="form-stack">
+      <Field label="Tantara"><select value={activeStoryId} onChange={e=>setStoryId(e.target.value)}>{stories.map(story=><option key={story.id} value={story.id}>{story.title}</option>)}</select></Field>
+      <button className="btn btn-outline" disabled={busy||!activeStoryId} onClick={async()=>{setError('');try{await perform(async()=>{const {data}=await studioApi.prepareAudio(activeStoryId);const errors=data.results.filter(r=>r.error);if(errors.length)setError(errors.map(r=>`${nodes.find(n=>n.id===r.node)?.titre_fr||r.node} : ${r.error}`).join(' · '));})}catch(e){setError(e.message)}}}>Préparer / réessayer les pistes FR manquantes</button>
       {storyNodes.map(group => <div key={group.story.id} className="story-node-group">
         <div className="story-node-heading"><strong>{group.story.title}</strong><Link className="btn btn-outline" to={`/previsualisation?story=${encodeURIComponent(group.story.id)}`}><Play size={14}/> Lire le parcours complet</Link></div>
         {group.items.map(n => <div className="story-node-row" key={n.id}>
           <div><strong>{n.titre_fr}</strong><small>{n.type === 'DECISION' ? 'DÉCISION : choix du joueur, sans vidéo' : n.type === 'ENDING' ? 'FIN' : 'SCÈNE'}</small></div>
-          {n.type !== 'DECISION' && ['fr','mg'].map(code => {const sc=nodeScene(n.id,code); return <div className="story-node-language" key={code}><span>{code.toUpperCase()} : {sc?.statut || 'Non configuré'}</span><button className="btn btn-outline" disabled={busy} onClick={() => sc ? editScene(sc) : openNodeForLanguage(n, code)}>{sc ? 'Modifier' : 'Associer'}</button></div>})}
+          {n.type !== 'DECISION' && ['fr','mg'].map(code => {const sc=nodeScene(n.id,code); return <div className="story-node-language" key={code}><span>{code.toUpperCase()} : {sc?.audio ? sc.statut : code==='fr'?'Narration à générer':'Facultatif'}</span><button className="btn btn-outline" disabled={busy} onClick={() => {setTrackOnly(true);sc ? editScene(sc,true) : openNodeForLanguage(n, code)}}>{sc?.audio ? 'Modifier' : 'Associer'} audio {code.toUpperCase()}</button></div>})}
+          {n.type !== 'DECISION'&&<div className="story-node-actions"><button className="btn btn-outline" disabled={busy} onClick={()=>{setTrackOnly(false);const sc=nodeScene(n.id,'fr');sc?editScene(sc):openNodeForLanguage(n,'fr')}}>Paramètres</button><button className="btn btn-outline" disabled={!nodeScene(n.id,'fr')} onClick={()=>{const sc=nodeScene(n.id,'fr');setPreviewSceneId(sc.id);document.getElementById(`scene-${sc.id}`)?.scrollIntoView({behavior:'smooth',block:'center'})}}>Voir · FR</button></div>}
         </div>)}
       </div>)}
       {!storyNodes.length && <div className="empty-state">Aucun nœud Django appliqué. Reviens dans « Arbres narratifs », enregistre puis applique le graphe.</div>}
-      <span className="muted">Un nœud narratif peut avoir deux montages distincts (FR et MG). « DRAFT » signifie que le média n'est pas encore finalisé ; « READY » indique un rendu prêt. Les décisions ne nécessitent pas de média.</span>
+      <span className="muted">La narration française est obligatoire pour chaque scène et fin. La piste malagasy est facultative. Sans fichier FR, le texte de la scène est synthétisé avec une voix configurée. Un nœud narratif peut avoir deux montages distincts (FR et MG). « DRAFT » signifie que le média n'est pas encore finalisé ; « READY » indique un rendu prêt. Les décisions ne nécessitent pas de média.</span>
     </div></Panel>
     <Panel title="Scènes et rendus" icon={AudioLines}><div className="resource-list">
-      {scenes.map(s=><div className="resource-list-row studio-preview-row" key={s.id}><span className="resource-list-icon"><AudioLines size={18}/></span><span className="resource-list-main"><strong>{nodes.find(n=>n.id===s.noeud)?.titre_fr||s.noeud}</strong><small>{s.mode} · {languages.find(l=>l.id===s.langue)?.code||s.langue} · {s.statut}</small></span><div className="table-actions"><button className="btn btn-outline" disabled={busy} onClick={()=>editScene(s)}>Modifier</button>
+      {scenes.map(s=><div className="resource-list-row studio-preview-row" id={`scene-${s.id}`} key={s.id}><span className="resource-list-icon"><AudioLines size={18}/></span><span className="resource-list-main"><strong>{nodes.find(n=>n.id===s.noeud)?.titre_fr||s.noeud}</strong><small>{s.mode} · {languages.find(l=>l.id===s.langue)?.code||s.langue} · {s.statut}</small></span><div className="table-actions"><button className="btn btn-outline" disabled={busy} onClick={()=>editScene(s)}>Modifier</button>
+      {s.audio&&!mediaById(s.audio)?.droits_confirmes&&<button className="btn btn-outline" disabled={busy} onClick={()=>{const licence=window.prompt('Licence vérifiée de cette voix générée :');if(licence?.trim())run(async()=>{await studioApi.confirmRights(s.audio,licence.trim());await studioApi.render(s.id)})}}>Valider les droits de la voix</button>}
       <button disabled={s.mode==='TEXT_ONLY'||busy} className="btn btn-outline" onClick={()=>render(s.id)}>{s.mode==='AUDIO_ONLY'?'Finaliser la voix':'Assembler'}</button>
       <button type="button" className="btn btn-outline" onClick={()=>setPreviewSceneId(p=>p===s.id?null:s.id)}>{previewSceneId===s.id?'Fermer l’aperçu':'Écouter / Voir'}</button></div>
       {previewSceneId===s.id&&<div className="studio-scene-preview">
@@ -208,19 +202,19 @@ export default function Voice() {
       <Field label="Nom du profil"><input required value={voiceForm.nom} onChange={e=>setVoiceForm(p=>({...p,nom:e.target.value}))}/></Field>
       <Field label="Model ID"><input required value={voiceForm.model_id} onChange={e=>setVoiceForm(p=>({...p,model_id:e.target.value}))}/></Field>
       <Field label="Voice ID"><input required value={voiceForm.voice_id} onChange={e=>setVoiceForm(p=>({...p,voice_id:e.target.value}))}/></Field>
-      <div className="soft-note">L'affichage d'une voix dans le catalogue ne garantit pas qu'elle soit autorisée par ton abonnement. Aucune génération sans action explicite.</div>
+      <div className="soft-note">L'affichage d'une voix dans le catalogue ne garantit pas qu'elle soit autorisée par ton abonnement. Une voix active permet la génération automatique des narrations manquantes lors de l’enregistrement des scènes.</div>
       {error&&<p className="api-error" role="alert">{error}</p>}
       <div className="form-actions"><button type="button" className="btn btn-outline" onClick={()=>setDialog(null)}>Annuler</button><button disabled={busy} className="btn btn-primary">Enregistrer</button></div>
     </form></Dialog>}
     {dialog==='scene'&&<Dialog title="Configurer les médias et la narration" onClose={()=>setDialog(null)}><form className="form-stack" onSubmit={createScene}>
-      <Field label="Nœud narratif"><select required value={sceneForm.noeud} onChange={e=>setSceneForm(p=>({...p,noeud:e.target.value}))}><option value="">Choisir une scène ou une fin</option>{availableNodes.map(n=><option key={n.id} value={n.id}>{n.titre_fr}</option>)}</select></Field>
+      <Field label="Nœud narratif"><select disabled={trackOnly} required value={sceneForm.noeud} onChange={e=>setSceneForm(p=>({...p,noeud:e.target.value}))}><option value="">Choisir une scène ou une fin</option>{availableNodes.map(n=><option key={n.id} value={n.id}>{n.titre_fr}</option>)}</select></Field>
       {!availableNodes.length&&<p className="form-hint">Le graphe doit d'abord être appliqué au backend.</p>}
-      <Field label="Langue"><select required value={sceneForm.langue} onChange={e=>setSceneForm(p=>({...p,langue:e.target.value}))}><option value="">Choisir une langue</option>{languages.map(l=><option key={l.id} value={l.id}>{l.nom_fr||l.code}</option>)}</select></Field>
-      <Field label="Mode"><select value={sceneForm.mode} onChange={e=>setSceneForm(p=>({...p,mode:e.target.value}))}><option value="TEXT_ONLY">Texte seul</option><option value="AUDIO_ONLY">Voix uniquement (sans vidéo)</option><option value="VIDEO_ORIGINAL">Vidéo avec son</option><option value="VIDEO_AUDIO">Vidéo + narration distincte</option><option value="IMAGE_AUDIO">Image + narration</option></select></Field>
+      <Field label="Langue"><select disabled={trackOnly} required value={sceneForm.langue} onChange={e=>setSceneForm(p=>({...p,langue:e.target.value}))}><option value="">Choisir une langue</option>{languages.map(l=><option key={l.id} value={l.id}>{l.nom_fr||l.code}</option>)}</select></Field>
+      <Field label="Mode"><select disabled={trackOnly} value={sceneForm.mode} onChange={e=>setSceneForm(p=>({...p,mode:e.target.value}))}><option value="TEXT_ONLY">Texte seul</option><option value="AUDIO_ONLY">Voix uniquement (sans vidéo)</option><option value="VIDEO_ORIGINAL">Vidéo avec son</option><option value="VIDEO_AUDIO">Vidéo + narration distincte</option><option value="IMAGE_AUDIO">Image + narration</option></select></Field>
       {sceneForm.mode.startsWith('VIDEO')&&<Field label="Vidéo"><select required value={sceneForm.video} onChange={e=>setSceneForm(p=>({...p,video:e.target.value}))}><option value="">Choisir une vidéo</option>{media.filter(m=>m.type==='VIDEO'&&m.droits_confirmes).map(m=><option key={m.id} value={m.id}>{m.titre}</option>)}</select></Field>}
       {sceneForm.mode==='IMAGE_AUDIO'&&<Field label="Image"><select required value={sceneForm.image} onChange={e=>setSceneForm(p=>({...p,image:e.target.value}))}><option value="">Choisir une image</option>{media.filter(m=>m.type==='IMAGE'&&m.droits_confirmes).map(m=><option key={m.id} value={m.id}>{m.titre}</option>)}</select></Field>}
       {['VIDEO_AUDIO','IMAGE_AUDIO','AUDIO_ONLY'].includes(sceneForm.mode)&&<>
-        <Field label="Audio importé / enregistré (sans texte obligatoire)"><select value={sceneForm.audio} onChange={e=>setSceneForm(p=>({...p,audio:e.target.value}))}><option value="">Aucun — synthèse TTS facultative plus tard</option>{media.filter(m=>m.type==='AUDIO'&&m.droits_confirmes).map(m=><option key={m.id} value={m.id}>{m.titre}</option>)}</select></Field>
+        <Field label="Audio importé / enregistré (sans texte obligatoire)"><select value={sceneForm.audio} onChange={e=>setSceneForm(p=>({...p,audio:e.target.value}))}><option value="">Aucun fichier — générer automatiquement depuis le texte</option>{media.filter(m=>m.type==='AUDIO'&&m.droits_confirmes).map(m=><option key={m.id} value={m.id}>{m.titre}</option>)}</select></Field>
         <div className="soft-note">Ou importer une voix déjà enregistrée directement dans la médiathèque privée :</div>
         <Field label="Fichier audio (MP3, WAV, M4A, OGG)"><input type="file" accept="audio/mpeg,audio/mp4,audio/wav,audio/ogg,.mp3,.wav,.m4a,.ogg" onChange={e=>{const file=e.target.files?.[0]||null;setAudioUpload(v=>({...v,file,title:file?.name?.replace(/\.[^.]+$/, '')||''}))}} /></Field>
         {audioUpload.file&&<>
@@ -230,7 +224,8 @@ export default function Voice() {
           <button type="button" className="btn btn-outline" disabled={uploadBusy||!audioUpload.rights||!audioUpload.licence.trim()||!audioUpload.title.trim()} onClick={uploadAudio}>{uploadBusy?'Import…':'Importer puis sélectionner cette voix'}</button>
         </>}
         <Field label="Voix"><select value={sceneForm.voix} onChange={e=>setSceneForm(p=>({...p,voix:e.target.value}))}><option value="">Choisir une voix ultérieurement</option>{voices.filter(v=>v.actif&&v.langue===sceneForm.langue).map(v=><option key={v.id} value={v.id}>{v.nom}</option>)}</select></Field>
-        <Field label="Narration TTS facultative"><textarea rows={3} value={sceneForm.narration_texte} onChange={e=>setSceneForm(p=>({...p,narration_texte:e.target.value}))}/></Field>
+        {!sceneForm.audio&&!voices.some(v=>v.actif&&v.langue===sceneForm.langue)&&<p className="api-error">Configure une voix active pour cette langue avant de générer la narration. Le texte seul peut être enregistré en brouillon.</p>}
+        <Field label="Texte à lire (à défaut, description française de la scène)"><textarea rows={3} value={sceneForm.narration_texte} onChange={e=>setSceneForm(p=>({...p,narration_texte:e.target.value}))}/></Field>
         {sceneForm.mode==='VIDEO_AUDIO'&&<div className="form-stack" style={{border:'1px solid #45415c',padding:14}}>
           <strong>Synchronisation audio / vidéo</strong>
           <small className="muted">La voix et la vidéo démarrent ensemble. En mode « Figer la dernière image », aucune parole n'est coupée et la vitesse ne change pas. Les autres réglages restent disponibles.</small>

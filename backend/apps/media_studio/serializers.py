@@ -1,6 +1,7 @@
 """Serializers d'édition : IDs internes conservés uniquement côté staff."""
 from django.urls import reverse
 from rest_framework import serializers
+from drf_yasg.utils import swagger_serializer_method
 from apps.core.serializers import ValidatedModelSerializer
 from .models import MediaAsset, VoiceProfile, SceneMedia, DialogueLine, GenerationJob
 
@@ -35,14 +36,25 @@ class SceneSerializer(ValidatedModelSerializer):
     video_source_url = serializers.SerializerMethodField()
     image_source_url = serializers.SerializerMethodField()
     audio_embedded = serializers.SerializerMethodField()
+    audio_tracks = serializers.SerializerMethodField()
 
     class Meta:
         model = SceneMedia
         fields = ('id', 'noeud', 'langue', 'mode', 'image', 'video', 'audio', 'sous_titres',
                   'video_finale', 'video_finale_url', 'audio_finale', 'audio_finale_url',
-                  'video_source_url', 'image_source_url', 'audio_source_url', 'audio_embedded',
+                  'video_source_url', 'image_source_url', 'audio_source_url', 'audio_embedded', 'audio_tracks',
                   'sync_mode', 'audio_trim_start_ms', 'audio_trim_end_ms', 'narration_texte', 'voix', 'statut', 'created_at', 'updated_at')
-        read_only_fields = ('id', 'video_finale', 'video_finale_url', 'audio_finale', 'audio_finale_url', 'video_source_url', 'image_source_url', 'audio_source_url', 'audio_embedded', 'statut', 'created_at', 'updated_at')
+        read_only_fields = ('id', 'video_finale', 'video_finale_url', 'audio_finale', 'audio_finale_url', 'video_source_url', 'image_source_url', 'audio_source_url', 'audio_embedded', 'audio_tracks', 'statut', 'created_at', 'updated_at')
+
+    @swagger_serializer_method(serializer_or_field=serializers.JSONField())
+    def get_audio_tracks(self, obj):
+        tracks = {'fr': None, 'mg': None}
+        for scene in obj.noeud.scene_media.select_related('langue').all():
+            code = scene.langue.code
+            if code in tracks and (scene.audio_id or scene.audio_finale_id):
+                tracks[code] = {'url': self._asset_url(scene.audio_finale_id or scene.audio_id),
+                                'status': scene.statut, 'synchronized': bool(scene.audio_finale_id)}
+        return tracks
 
     def get_video_finale_url(self, obj):
         request = self.context.get('request')

@@ -1,9 +1,9 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { BookOpen, Eye, GitBranch, ImagePlus, Pencil, Plus, RefreshCw, Search, Trash2, X } from 'lucide-react';
+import { BookOpen, Eye, GitBranch, ImagePlus, Pencil, Plus, RefreshCw, Search, Send, Trash2, X } from 'lucide-react';
 import { Dialog, EmptyState, Field, Panel, StatCard, Status } from '../components/UI';
 import { useAdmin } from '../lib/store';
-import { translationApi } from '../services/editor';
+import { translationApi, publicationApi } from '../services/editor';
 
 const fields=[
   ['titre','Titre'],['sous_titre','Sous-titre'],['theme','Thème'],
@@ -46,6 +46,12 @@ export default function Tantara(){
   };
 
   const [actionError,setActionError]=useState('');
+  const [publishTarget,setPublishTarget]=useState(null);
+  const [releaseNumber,setReleaseNumber]=useState('');
+  const publish=async e=>{e.preventDefault();setActionError('');try{
+    await perform(()=>publicationApi.publish({numero:releaseNumber,journal:`Publication depuis Tantara : ${publishTarget.title}`}));
+    setPublishTarget(null);
+  }catch(err){setActionError(err.message)}};
   useEffect(()=>setSearch(params.get('q')||''),[params]);
   const publishedSlugs=useMemo(() => new Set((releases.find(r => r.statut === 'ACTIVE')?.fichiers || []).filter(f => f.type === 'STORY').map(f => f.chemin?.match(/^stories\/([a-z0-9-]+)\.json$/)?.[1]).filter(Boolean)), [releases]);
   const effectiveStatus=s=>publishedSlugs.has(s.slug)?'published':(s.status==='published'?'ready':s.status);
@@ -75,10 +81,16 @@ export default function Tantara(){
       <div className="table-toolbar"><label className="search-control"><Search size={16}/><input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Chercher un Tantara…"/></label>
         <div className="filter-tabs">{[['all','Tous'],['published','Publiés'],['draft','Brouillons'],['review','À relire']].map(([v,t])=><button key={v} className={`filter-tab ${status===v?'selected':''}`} onClick={()=>setStatus(v)}>{t}</button>)}</div></div>
       {filtered.length?<div className="data-table-wrap"><table className="data-table"><thead><tr><th>Tantara</th><th>Thème</th><th>Révision</th><th>Traduction</th><th>Statut</th><th>Actions</th></tr></thead><tbody>
-        {filtered.map(s=><tr key={s.id}><td><div className="story-table-identity">{s.coverUrl?<img className="story-cover-thumb" src={s.coverUrl} alt="" loading="lazy"/>:<span className="story-cover-thumb story-cover-placeholder"><BookOpen size={20}/></span>}<span><strong>{s.title}</strong><small>{s.titre_mg || s.slug}</small></span></div></td><td>{s.theme}</td><td>{s.revision || '1.0'}</td><td><span className={`translation-status translation-${s.translation_state?.state||'NONE'}`}>{({PENDING:'En file',FAILED:'Erreur',REVIEW_REQUIRED:'À relire',NONE:'—'})[s.translation_state?.state||'NONE']}</span></td><td><Status value={effectiveStatus(s)}/></td><td><div className="table-actions">{s.translation_state?.state==='FAILED'&&<button title="Relancer la traduction MG" onClick={async()=>{try{await perform(()=>translationApi.retry('content_api.Tantara',s.id))}catch(e){alert(e.message)}}}><RefreshCw size={16}/></button>}<button className="preview-open-btn" title="Prévisualiser le parcours complet" onClick={()=>navigate(`/previsualisation?story=${encodeURIComponent(s.id)}`)}><Eye size={16}/> Aperçu</button><button title="Éditer les détails" onClick={()=>edit(s)}><Pencil size={16}/></button><button title="Éditer l’arbre" onClick={()=>navigate(`/arbre?story=${encodeURIComponent(s.id)}`)}><GitBranch size={16}/></button><button title="Supprimer" onClick={()=>del(s)}><Trash2 size={16}/></button></div></td></tr>)}
+        {filtered.map(s=><tr key={s.id}><td><div className="story-table-identity">{s.coverUrl?<img className="story-cover-thumb" src={s.coverUrl} alt="" loading="lazy"/>:<span className="story-cover-thumb story-cover-placeholder"><BookOpen size={20}/></span>}<span><strong>{s.title}</strong><small>{s.titre_mg || s.slug}</small></span></div></td><td>{s.theme}</td><td>{s.revision || '1.0'}</td><td><span className={`translation-status translation-${s.translation_state?.state||'NONE'}`}>{({PENDING:'En file',FAILED:'Erreur',REVIEW_REQUIRED:'À relire',NONE:'—'})[s.translation_state?.state||'NONE']}</span></td><td><Status value={effectiveStatus(s)}/></td><td><div className="table-actions">{s.translation_state?.state==='FAILED'&&<button title="Relancer la traduction MG" onClick={async()=>{try{await perform(()=>translationApi.retry('content_api.Tantara',s.id))}catch(e){alert(e.message)}}}><RefreshCw size={16}/></button>}<button className="preview-open-btn" title="Prévisualiser le parcours complet" onClick={()=>navigate(`/previsualisation?story=${encodeURIComponent(s.id)}`)}><Eye size={16}/> Aperçu</button>{['ready','published'].includes(s.status)&&<button className="preview-open-btn" title="Publier une release avec les récits approuvés" disabled={busy} onClick={()=>{setActionError('');setReleaseNumber(new Date().toISOString().replace(/[-:]/g,'').slice(0,15));setPublishTarget(s)}}><Send size={16}/> {publishedSlugs.has(s.slug)?'Republier':'Publier'}</button>}<button title="Éditer les détails" onClick={()=>edit(s)}><Pencil size={16}/></button><button title="Éditer l’arbre" onClick={()=>navigate(`/arbre?story=${encodeURIComponent(s.id)}`)}><GitBranch size={16}/></button><button title="Supprimer" onClick={()=>del(s)}><Trash2 size={16}/></button></div></td></tr>)}
       </tbody></table></div>:<EmptyState title="Aucune histoire" description="Ajoutez un Tantara ou modifiez les filtres."/>}
       <div className="table-footer">Contenus enregistrés sur Django · aucune progression de joueur collectée</div>
     </Panel>
+    {publishTarget&&<Dialog title={`Publier ${publishTarget.title}`} onClose={()=>setPublishTarget(null)}><form className="form-stack" onSubmit={publish}>
+      <p>Cette release publie les Tantara approuvés, dont cette histoire. Les contrôles du backend restent obligatoires.</p>
+      <Field label="Version unique"><input required maxLength={40} pattern="[a-zA-Z0-9][a-zA-Z0-9._-]{0,39}" value={releaseNumber} onChange={e=>setReleaseNumber(e.target.value)}/></Field>
+      {actionError&&<p role="alert" className="api-error">{actionError}</p>}
+      <button className="btn btn-primary" disabled={busy}>Confirmer la publication</button>
+    </form></Dialog>}
     {modal&&<Dialog title={modal.mode==='create'?'Créer un Tantara':'Modifier le Tantara'} onClose={()=>setModal(null)}><form className="form-stack" onSubmit={save}>
       <p className="form-hint">Rédige en français. Le backend génère les traductions malgaches en arrière-plan ; elles doivent être relues avant publication.</p>
       <div className="form-two"><Field label="Identifiant (slug)" required><input value={form.slug} required maxLength={40} onChange={e=>setForm(p=>({...p,slug:slug(e.target.value)}))}/></Field><Field label="Numéro (01–99)" required><input required maxLength={2} pattern="[0-9]{2}" value={form.numero} onChange={e=>setForm(p=>({...p,numero:e.target.value}))}/></Field></div>

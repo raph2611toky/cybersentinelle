@@ -107,3 +107,13 @@ voice_catalog_doc = swagger_auto_schema(
         'language': openapi.Schema(type=openapi.TYPE_STRING),
     })),
 )
+
+prepare_story_audio_doc = swagger_auto_schema(
+    operation_summary='Préparer les narrations FR manquantes du Tantara',
+    tags=['Studio / Voix'],
+    responses=responses(openapi.Schema(type=openapi.TYPE_OBJECT, required=['results'], properties={
+        'results': openapi.Schema(type=openapi.TYPE_ARRAY, items=openapi.Schema(
+            type=openapi.TYPE_OBJECT, required=['node', 'error'], properties={
+                'node': openapi.Schema(type=openapi.TYPE_STRING, format='uuid'),
+                'error': openapi.Schema(type=openapi.TYPE_STRING, x_nullable=True),
+            }))}), 202))

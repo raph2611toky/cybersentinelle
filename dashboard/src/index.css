@@ -109,3 +109,21 @@ code {
   padding: 4px 8px;
   background: var(--code-bg);
 }
+
+/* Narrative routes: decorative wires, editable ports only at the bottom. */
+.flow-decision{position:relative;padding-bottom:0!important}
+.decision-routing{position:relative;padding-bottom:66px;margin-top:12px}
+.decision-routing .flow-option{position:static;margin:7px 0;padding:9px 10px;min-height:36px}
+.decision-wires{position:absolute;bottom:0;left:0;width:100%;height:66px;pointer-events:none}
+.edge-context-menu{position:fixed;z-index:10000;padding:8px;background:#131725;border:1px solid #665181;box-shadow:0 8px 35px #0009;border-radius:8px}
+.story-node-row{display:flex!important;gap:14px;flex-wrap:wrap;align-items:center}
+.story-node-row>div:first-child{flex:1;min-width:220px}
+.story-node-language{display:flex;gap:8px;align-items:center}
+.story-node-actions{display:flex;gap:8px;flex-wrap:wrap}
+.studio-preview-row .table-actions{display:flex;gap:8px;flex-wrap:wrap}
+
+.decision-routing .flow-option{margin-right:36px}
+.decision-wires{height:100%;z-index:0}
+.decision-routing>.react-flow__handle{z-index:2}
+
+.studio-preview-row .table-actions .btn{display:inline-flex;width:auto;height:auto;min-height:34px;padding:8px 12px;white-space:nowrap;border:1px solid #405475}

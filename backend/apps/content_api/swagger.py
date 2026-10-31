@@ -20,6 +20,18 @@ option = openapi.Schema(
         "label": lang,
         "feedback": lang,
         "quality": openapi.Schema(type=openapi.TYPE_NUMBER, minimum=0, maximum=1),
+        "default_audio_language": openapi.Schema(type=openapi.TYPE_STRING, enum=['fr']),
+        "audio_tracks": openapi.Schema(type=openapi.TYPE_OBJECT, properties={
+            code: openapi.Schema(type=openapi.TYPE_OBJECT, x_nullable=True, properties={
+                'url': str_field('URL de la piste synchronisée MP3'), 'language': str_field()
+            }) for code in ('fr', 'mg')
+        }),
+        "media": openapi.Schema(type=openapi.TYPE_OBJECT, properties={
+            code: openapi.Schema(type=openapi.TYPE_OBJECT, properties={
+                'mode': str_field(), 'video_url': str_field(), 'audio_url': str_field(),
+                'audio_embedded': openapi.Schema(type=openapi.TYPE_BOOLEAN), 'subtitle_url': str_field()
+            }) for code in ('fr', 'mg')
+        }),
         "next": str_field(),
     },
 )
@@ -35,6 +47,18 @@ node = openapi.Schema(
         "tag": str_field("Scène uniquement"),
         "visual": str_field("Identifiant visuel statique"),
         "visual_url": str_field("URL absolue si visuel présent"),
+        "default_audio_language": openapi.Schema(type=openapi.TYPE_STRING, enum=['fr']),
+        "audio_tracks": openapi.Schema(type=openapi.TYPE_OBJECT, properties={
+            code: openapi.Schema(type=openapi.TYPE_OBJECT, x_nullable=True, properties={
+                'url': str_field('URL de la piste synchronisée MP3'), 'language': str_field()
+            }) for code in ('fr', 'mg')
+        }),
+        "media": openapi.Schema(type=openapi.TYPE_OBJECT, properties={
+            code: openapi.Schema(type=openapi.TYPE_OBJECT, properties={
+                'mode': str_field(), 'video_url': str_field(), 'audio_url': str_field(),
+                'audio_embedded': openapi.Schema(type=openapi.TYPE_BOOLEAN), 'subtitle_url': str_field()
+            }) for code in ('fr', 'mg')
+        }),
         "next": str_field("Transition scène uniquement"),
         "weight": openapi.Schema(
             type=openapi.TYPE_INTEGER, description="Décision uniquement"

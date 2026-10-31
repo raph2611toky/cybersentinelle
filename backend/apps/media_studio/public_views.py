@@ -3,7 +3,7 @@ import hashlib
 import re
 from pathlib import Path
 from django.conf import settings
-from django.http import FileResponse
+from django.http import FileResponse, StreamingHttpResponse, HttpResponse
 from rest_framework.permissions import AllowAny
 from rest_framework.views import APIView
 from helpers.api.responses import error, failed
@@ -47,7 +47,22 @@ class PublishedSceneMediaAPIView(APIView):
             if digest.hexdigest() != entry['sha256']:
                 return error(503, 'CONTENT_NOT_PUBLISHED', 'Média publié corrompu')
             mime = 'audio/mpeg' if target.endswith('.mp3') else 'video/mp4'
-            response = FileResponse(fpath.open('rb'), content_type=mime)
+            from .views import parse_byte_range, stream_range
+            size = fpath.stat().st_size
+            range_header = request.headers.get('Range')
+            if range_header:
+                byte_range = parse_byte_range(range_header, size)
+                if byte_range is None:
+                    response = HttpResponse(status=416)
+                    response['Content-Range'] = f'bytes */{size}'
+                    return response
+                start, end = byte_range
+                response = StreamingHttpResponse(stream_range(fpath.open('rb'), start, end-start+1), status=206, content_type=mime)
+                response['Content-Range'] = f'bytes {start}-{end}/{size}'
+                response['Content-Length'] = str(end-start+1)
+            else:
+                response = FileResponse(fpath.open('rb'), content_type=mime)
+            response['Accept-Ranges'] = 'bytes' 
             response['Content-Disposition'] = f'inline; filename="clip-{asset_id}.{target.rsplit('.', 1)[-1]}"'
             response['Cache-Control'] = 'public, max-age=86400, immutable'
             return response
