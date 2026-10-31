@@ -1,3 +1,6 @@
+// SAFIDIKO — based on the supplied Diakom pipeline stage layout.
+// Jenkins Multibranch branches: backend, dashboard, rebuild.
+// `rebuild` redeploys both applications but NEVER resets MySQL data.
 pipeline {
     agent any
 
@@ -11,8 +14,8 @@ pipeline {
         REDIS_DOCKER_NAME      = 'safidiko-redis'
 
         APP_NETWORK = 'safidiko-network'
-        BACKEND_PORT = '8466'
-        DASHBOARD_PORT = '8467'
+        BACKEND_PORT = '8465'
+        DASHBOARD_PORT = '8463'
 
         SAFIDIKO_ENV  = '/var/lib/jenkins/secrets/safidiko'
         BACKEND_ENV   = '/var/lib/jenkins/secrets/safidiko/backend.env'
@@ -27,6 +30,8 @@ pipeline {
         GOOGLE_SECRETS_DIR = '/var/lib/jenkins/secrets/safidiko/gcp'
     }
 
+    // Create Secret Text credential `safidiko-webhook-token` in Jenkins.
+    // Never paste the original template's literal webhook token into source control.
     triggers {
         GenericTrigger(
             genericVariables: [
@@ -176,6 +181,17 @@ pipeline {
                         -v "$RELEASES_DIR:/app/content/releases" \
                         "$BACKEND_DOCKER_IMAGE:$BUILD_NUMBER" \
                         python manage.py migrate --noinput
+
+                    # Référentiels pour les listes déroulantes : FR/MG, sujets,
+                    # source éditoriale interne. Idempotent, arrêt si erreur.
+                    docker run --rm \
+                        --env-file "$BACKEND_ENV" \
+                        -e CELERY_BROKER_URL="redis://$REDIS_DOCKER_NAME:6379/0" \
+                        --network "$APP_NETWORK" \
+                        --add-host=host.docker.internal:host-gateway \
+                        -v "$GOOGLE_SECRETS_DIR:/run/secrets:ro" \
+                        "$BACKEND_DOCKER_IMAGE:$BUILD_NUMBER" \
+                        python manage.py seed_defaults --no-color
 
                     docker run --rm \
                         --env-file "$BACKEND_ENV" \
