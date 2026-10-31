@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useState } from 'react';
-import { useNavigate, useSearchParams } from 'react-router-dom';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { BookOpen, Eye, GitBranch, ImagePlus, Pencil, Plus, RefreshCw, Search, Send, Trash2, X } from 'lucide-react';
 import { Dialog, EmptyState, Field, Panel, StatCard, Status } from '../components/UI';
 import { useAdmin } from '../lib/store';
 import { translationApi, publicationApi } from '../services/editor';
+import { apiError } from '../services/api';
 
 const fields=[
   ['titre','Titre'],['sous_titre','Sous-titre'],['theme','Thème'],
@@ -15,7 +16,7 @@ function slug(s){return s.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f
 function nextNumber(stories){const nums=new Set(stories.map(s=>s.numero));for(let i=1;i<=99;i++){const n=String(i).padStart(2,'0');if(!nums.has(n))return n;}return ''}
 
 export default function Tantara(){
-  const {stories,releases,addStory,updateStory,removeStory,perform,busy}=useAdmin();
+  const {stories,releases,nodes,scenes,languages,addStory,updateStory,removeStory,perform,busy}=useAdmin();
   const navigate=useNavigate();const [params]=useSearchParams();
   const [search,setSearch]=useState(params.get('q')||'');
   const [status,setStatus]=useState('all');
@@ -48,10 +49,37 @@ export default function Tantara(){
   const [actionError,setActionError]=useState('');
   const [publishTarget,setPublishTarget]=useState(null);
   const [releaseNumber,setReleaseNumber]=useState('');
+  const [publishCheck,setPublishCheck]=useState({state:'idle',message:''});
+  const [preflightRevision,setPreflightRevision]=useState(0);
+  useEffect(()=>{
+    if (!publishTarget) {setPublishCheck({state:'idle',message:''});return;}
+    let active=true;
+    setPublishCheck({state:'checking',message:''});
+    publicationApi.validate().then(()=>{
+      if(active)setPublishCheck({state:'valid',message:'Contrôles Django réussis. La publication peut être lancée.'});
+    }).catch(error=>{
+      if(active)setPublishCheck({state:'invalid',message:apiError(error)});
+    });
+    return ()=>{active=false;};
+  },[publishTarget?.id,preflightRevision]);
+  const localPublishIssues = useMemo(()=>{
+    if (!publishTarget) return [];
+    const matching = nodes.filter(node=>String(node.tantara)===String(publishTarget.id));
+    const decisionCount = matching.filter(node=>node.type==='DECISION').length;
+    const frenchId = languages.find(l=>l.code==='fr')?.id;
+    const audiovisual = matching.filter(node=>['SCENE','ENDING'].includes(node.type));
+    const missing = audiovisual.filter(node=>!scenes.some(scene=>String(scene.noeud)===String(node.id) && String(scene.langue)===String(frenchId) && scene.statut==='READY' && scene.audio_finale));
+    const issues=[];
+    if (decisionCount < Number(publishTarget.decisions_attendues)) issues.push(`${decisionCount} nœud(s) décision dans l'arbre pour ${publishTarget.decisions_attendues} décisions exigées sur chaque chemin.`);
+    if (missing.length) issues.push(`${missing.length} scène(s)/fin(s) sans piste FR finalisée : ${missing.slice(0,5).map(n=>n.titre_fr||n.cle).join(', ')}${missing.length>5?'…':''}`);
+    return issues;
+  },[publishTarget,nodes,scenes,languages]);
   const publish=async e=>{e.preventDefault();setActionError('');try{
+    // Le contrôle est global : les autres Tantara approuvés comptent aussi.
+    await publicationApi.validate();
     await perform(()=>publicationApi.publish({numero:releaseNumber,journal:`Publication depuis Tantara : ${publishTarget.title}`}));
     setPublishTarget(null);
-  }catch(err){setActionError(err.message)}};
+  }catch(err){setActionError(apiError(err));setPublishCheck({state:'invalid',message:apiError(err)})}};
   useEffect(()=>setSearch(params.get('q')||''),[params]);
   const publishedSlugs=useMemo(() => new Set((releases.find(r => r.statut === 'ACTIVE')?.fichiers || []).filter(f => f.type === 'STORY').map(f => f.chemin?.match(/^stories\/([a-z0-9-]+)\.json$/)?.[1]).filter(Boolean)), [releases]);
   const effectiveStatus=s=>publishedSlugs.has(s.slug)?'published':(s.status==='published'?'ready':s.status);
@@ -88,8 +116,16 @@ export default function Tantara(){
     {publishTarget&&<Dialog title={`Publier ${publishTarget.title}`} onClose={()=>setPublishTarget(null)}><form className="form-stack" onSubmit={publish}>
       <p>Cette release publie les Tantara approuvés, dont cette histoire. Les contrôles du backend restent obligatoires.</p>
       <Field label="Version unique"><input required maxLength={40} pattern="[a-zA-Z0-9][a-zA-Z0-9._-]{0,39}" value={releaseNumber} onChange={e=>setReleaseNumber(e.target.value)}/></Field>
+      <div className="publish-preflight" role="status" aria-live="polite">
+        <div className="publish-check-heading"><strong>Vérification avant publication</strong><button type="button" className="btn btn-outline" disabled={publishCheck.state==='checking'} onClick={()=>setPreflightRevision(r=>r+1)}>Revérifier</button></div>
+        {publishCheck.state==='checking'&&<p>Vérification des contenus auprès de Django…</p>}
+        {publishCheck.state==='valid'&&<p className="track-status-ready">{publishCheck.message}</p>}
+        {publishCheck.state==='invalid'&&<p className="api-error">{publishCheck.message}</p>}
+        {localPublishIssues.map(issue=><p key={issue} className="form-hint">• {issue}</p>)}
+        <div className="publish-help-links"><Link to={`/arbre?story=${encodeURIComponent(publishTarget.id)}`} onClick={()=>setPublishTarget(null)}>Corriger le graphe</Link><Link to="/voix" onClick={()=>setPublishTarget(null)}>Préparer les pistes FR</Link></div>
+      </div>
       {actionError&&<p role="alert" className="api-error">{actionError}</p>}
-      <button className="btn btn-primary" disabled={busy}>Confirmer la publication</button>
+      <button className="btn btn-primary" disabled={busy||publishCheck.state!=='valid'}>Confirmer la publication</button>
     </form></Dialog>}
     {modal&&<Dialog title={modal.mode==='create'?'Créer un Tantara':'Modifier le Tantara'} onClose={()=>setModal(null)}><form className="form-stack" onSubmit={save}>
       <p className="form-hint">Rédige en français. Le backend génère les traductions malgaches en arrière-plan ; elles doivent être relues avant publication.</p>

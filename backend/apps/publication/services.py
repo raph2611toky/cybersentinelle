@@ -230,10 +230,30 @@ def publication_payload():
             'noeud', 'langue', 'video_finale', 'audio_finale', 'video', 'audio'
         )
         by_node = {(scene.noeud_id, scene.langue.code): scene for scene in scene_media}
+        missing_french = []
         for node in story.noeuds.filter(type__in=['SCENE', 'ENDING']):
             french = by_node.get((node.pk, 'fr'))
             if not french or not french.audio_finale_id or french.statut != SceneMedia.Status.READY:
-                raise ValidationError(f'{story.slug}:{node.cle}: piste française finalisée obligatoire ; préparer les voix puis rendre la scène')
+                if not french:
+                    reason = 'piste absente'
+                else:
+                    latest = french.jobs.order_by('-created_at').first()
+                    if latest and latest.statut in {'PENDING', 'RUNNING'}:
+                        reason = 'traitement vocal en attente/en cours'
+                    elif latest and latest.statut == 'FAILED':
+                        reason = f'échec du worker : {latest.code_erreur or latest.type}'
+                    elif french.audio_id:
+                        reason = 'fichier audio à finaliser par FFmpeg'
+                    else:
+                        reason = 'texte à synthétiser ou fichier FR à importer'
+                missing_french.append(f'{node.cle} ({reason})')
+        if missing_french:
+            sample = ', '.join(missing_french[:6])
+            extra = f' et {len(missing_french)-6} autre(s)' if len(missing_french) > 6 else ''
+            raise ValidationError(
+                f'{story.slug}: {len(missing_french)} piste(s) FR non finalisée(s) : {sample}{extra}. '
+                'Studio vocal → Associer audio FR → importer un fichier ou créer la voix, puis attendre un rendu READY.'
+            )
         for scene in scene_media:
             # An absent/empty Malagasy draft is optional; a configured track must be valid.
             if scene.langue.code == 'mg' and not scene.audio_id and not scene.narration_texte.strip():

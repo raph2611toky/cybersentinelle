@@ -39,7 +39,7 @@ export function draftSceneSources({ scenes, languages, media, nodeId, lang = 'fr
   const audio = chosenSound || frenchSound;
   const audioLanguage = chosenSound ? lang : frenchSound ? 'fr' : null;
   const finalVideo = adminMediaUrl(visual?.statut === 'READY' ? visual?.video_finale_url : '');
-  const video = finalVideo || fallbackSource(visual, 'video_source_url', media);
+  const video = (audio ? fallbackSource(visual, 'video_source_url', media) || finalVideo : finalVideo || fallbackSource(visual, 'video_source_url', media));
   const image = fallbackSource(visual, 'image_source_url', media);
   // Source audio indépendante prioritaire, donc la vidéo doit être muette.
   const embeddedAudio = Boolean(!audio && finalVideo && visual?.audio_embedded);

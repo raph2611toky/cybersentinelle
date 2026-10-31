@@ -687,3 +687,25 @@ option {background:#141419;color:#f0f0f5;}
 /* Fond uni à l'intérieur des nouveaux panneaux, dans la palette actuelle. */
 .voice-collapsible,.voice-workspace {background:#121216;border:1px solid #36313e;}
 .voice-workspace-content {background:#121216;}
+
+/* Piste audio rapide : aucun doublon des paramètres généraux de la scène. */
+.dialog.dialog-track-quick {width:min(720px,calc(100vw - 24px));max-width:720px;max-height:min(90dvh,760px);padding:22px 24px 0;}
+.dialog-track-quick .quick-track-form {display:flex;flex-direction:column;gap:15px;overflow-y:auto;min-height:0;padding:3px 3px 0 0;}
+.dialog-track-quick .field {min-width:0;}
+.dialog-track-quick input[type=file],.dialog-track-quick select,.dialog-track-quick textarea {max-width:100%;width:100%;}
+.dialog-track-quick .quick-track-rights {display:flex;align-items:flex-start;gap:10px;font-size:12px;color:#d3d6e3;}
+.dialog-track-quick .quick-track-rights input {flex-shrink:0;width:16px;height:16px;margin:0;}
+.dialog-track-quick .form-actions {position:sticky;bottom:0;z-index:5;background:#141419;margin:0;padding:12px 0 15px;border-top:1px solid #433b55;justify-content:flex-end;}
+.track-status {font-size:11px;line-height:1.45;color:#bdc3d2;display:inline-block;white-space:normal;}
+.track-status-ready {color:#86d9bb;}
+.track-status-pending,.track-status-running {color:#f5d58a;}
+.track-status-failed {color:#ff9ca5;}
+.track-status-missing {color:#abb2c4;}
+.dialog-track-quick .track-status {padding:9px 12px;border:1px solid #3b3455;background:#1a1725;}
+@media (max-width:560px){.dialog.dialog-track-quick {padding:14px 14px 0;max-height:calc(100dvh - 16px);}.dialog-track-quick .form-two{grid-template-columns:1fr;}}
+.publish-preflight {display:flex;flex-direction:column;gap:7px;padding:12px;border:1px solid #494359;background:#1a1823;font-size:12px;}
+.publish-preflight p {margin:0;overflow-wrap:anywhere;}
+.publish-help-links {display:flex;flex-wrap:wrap;gap:15px;padding-top:6px;}
+.publish-help-links a {font-weight:600;color:#a7c9ff;text-decoration:underline;}
+.publish-check-heading {display:flex;align-items:center;justify-content:space-between;gap:12px;}
+.publish-check-heading button {padding:6px 10px;min-width:auto;}

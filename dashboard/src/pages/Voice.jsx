@@ -16,6 +16,12 @@ export default function Voice() {
   const [previewLang,setPreviewLang]=useState('fr');
   const activeStoryId=storyId || stories[0]?.id || '';
   const [trackOnly,setTrackOnly]=useState(false);
+  const [quickTrack,setQuickTrack] = useState(null);
+  const [quickFile,setQuickFile] = useState(null);
+  const [quickRights,setQuickRights] = useState(false);
+  const [quickSource,setQuickSource] = useState('file');
+  const [quickSaving,setQuickSaving] = useState(false);
+  const [quickError,setQuickError] = useState('');
   const [lang,setLang] = useState('fr');
   const [text,setText] = useState('Tu peux demander de l’aide à une personne de confiance.');
   const [playing,setPlaying] = useState(false);
@@ -52,6 +58,92 @@ export default function Voice() {
   const storyNodes = useMemo(() => stories.filter(story=>String(story.id)===String(activeStoryId)).map(story => ({ story, items: nodes.filter(n => String(n.tantara) === String(story.id)) })).filter(g => g.items.length), [stories, nodes, activeStoryId]);
   const nodeScene = (nodeId, code) => { const id = languages.find(l => l.code === code)?.id; return scenes.find(s => String(s.noeud) === String(nodeId) && String(s.langue) === String(id)); };
   const openNodeForLanguage = (node, code) => { const l = languages.find(item => item.code === code); if (!l) return; setError(''); setAudioUpload({file:null,title:'',licence:'',rights:false}); const fr=nodeScene(node.id,'fr');setSceneForm({...blankScene(), noeud:node.id, langue:l.id,video:fr?.video||'',image:fr?.image||'',mode:fr?.video?'VIDEO_AUDIO':fr?.image?'IMAGE_AUDIO':'AUDIO_ONLY',narration_texte:code==='fr'?node.texte_fr||'':'',voix:voices.find(v=>v.actif&&v.langue===l.id)?.id||''}); setDialog('scene'); };
+  const latestJob = (sceneId, type) => jobs.find(job => String(job.scene) === String(sceneId) && (!type || job.type === type));
+  const jobFailureLabel = code => ({
+    QUEUE_UNAVAILABLE:'Worker indisponible (broker Celery)',
+    TTS_PROVIDER_DISABLED:'Fournisseur TTS désactivé',
+    TTS_VOICE_INVALID:'Voix TTS invalide',
+    MISSING_AUDIO:'Piste source introuvable',
+    FFMPEG_NOT_INSTALLED:'FFmpeg absent du worker',
+    RENDER_FAILED:'Échec du rendu FFmpeg',
+    TTS_DAILY_LIMIT:'Quota TTS épuisé',
+  })[code] || code || 'Erreur inconnue';
+  const trackStatus = (nodeId, code) => {
+    const scene = nodeScene(nodeId, code);
+    if (!scene) return { label: code === 'mg' ? 'Facultative · absente' : 'Absente', state:'missing' };
+    const job = latestJob(scene.id);
+    const status = job?.statut;
+    if (status === 'PENDING') return {label:`En attente du worker · ${job.type}${job.created_at && Date.now()-new Date(job.created_at).getTime()>120000 ? ' (vérifier Celery)' : ''}`,state:'pending'};
+    if (status === 'RUNNING') return {label:`En cours · ${job.type}`,state:'running'};
+    if (status === 'FAILED' && scene.statut !== 'READY') return {label:`Échec · ${jobFailureLabel(job.code_erreur)}`,state:'failed'};
+    if (scene.statut === 'READY' && scene.audio_finale) return mediaById(scene.audio)?.droits_confirmes === false || mediaById(scene.audio_finale)?.droits_confirmes === false ? {label:'Terminé · droits à valider',state:'draft'} : {label:'Terminé · piste finalisée',state:'ready'};
+    if (scene.audio) return {label:'Fichier reçu · rendu à terminer',state:'draft'};
+    if (scene.narration_texte) return {label:'Texte enregistré · aucun worker TTS actif',state:'draft'};
+    return {label:'Aucune tâche ni piste',state:'missing'};
+  };
+  const openQuickTrack = (node, code) => {
+    const scene = nodeScene(node.id,code);
+    const french = nodeScene(node.id,'fr');
+    setQuickFile(null);setQuickRights(false);setQuickError('');
+    setQuickSource(code === 'mg' ? 'file' : (scene?.audio ? 'file' : 'text'));
+    setQuickTrack({nodeId:node.id,language:code,existing:scene?.id || '',
+      audio:scene?.audio || scene?.audio_finale || '',
+      text:scene?.narration_texte || (code === 'fr' ? node.texte_fr || '' : ''),
+      voice:scene?.voix || voices.find(v=>v.actif && String(v.langue)===String(languages.find(l=>l.code===code)?.id))?.id || '',
+      sync_mode:scene?.sync_mode || 'FREEZE_LAST',
+      audio_trim_start_ms:scene?.audio_trim_start_ms || 0,
+      audio_trim_end_ms:scene?.audio_trim_end_ms ?? null,
+      video:scene?.video || french?.video || '',
+      image:scene?.image || french?.image || ''});
+    setDialog('track');
+  };
+  const saveQuickTrack = async event => {
+    event.preventDefault();
+    if (!quickTrack || quickSaving) return;
+    setQuickError('');
+    const language = languages.find(item=>item.code===quickTrack.language);
+    if (!language) {setQuickError('Langue indisponible dans Django.');return;}
+    if (quickSource==='file' && !quickFile && !quickTrack.audio) {setQuickError('Choisis un fichier audio pour cette piste.');return;}
+    if (quickSource==='file' && quickFile && !quickRights) {setQuickError('Confirme les droits de diffusion de cette voix.');return;}
+    if (quickSource==='text' && !quickTrack.text.trim()) {setQuickError('Renseigne le texte français à lire.');return;}
+    setQuickSaving(true);
+    try {
+      const suppliedVoice = voices.find(v=>v.actif && String(v.id)===String(quickTrack.voice) && String(v.langue)===String(language.id)) || voices.find(v=>v.actif && String(v.langue)===String(language.id));
+      let audioId = quickSource === 'file' ? quickTrack.audio || null : null;
+      if (quickSource === 'file' && quickFile) {
+        const form = new FormData();
+        form.append('fichier',quickFile);
+        form.append('type','AUDIO');
+        form.append('langue',quickTrack.language);
+        form.append('titre',quickFile.name.replace(/\.[^.]+$/, '').slice(0,200) || 'Narration');
+        form.append('licence','Voix importée par l’administrateur · droits de diffusion confirmés');
+        form.append('droits_confirmes','true');
+        const uploaded = await studioApi.upload(form);
+        audioId = uploaded.data.id;
+        setQuickFile(null);
+        setQuickTrack(p=>({...p,audio:audioId}));
+      }
+      const existing = scenes.find(s => String(s.noeud)===String(quickTrack.nodeId) && String(s.langue)===String(language.id));
+      const payload = {
+        noeud:quickTrack.nodeId,langue:language.id,
+        mode: quickTrack.video ? 'VIDEO_AUDIO' : quickTrack.image ? 'IMAGE_AUDIO' : 'AUDIO_ONLY',
+        video: quickTrack.video || null, image:quickTrack.video ? null : (quickTrack.image || null),
+        audio:audioId,
+        voix:quickSource==='text' ? (suppliedVoice?.id || null) : null,
+        narration_texte:quickSource==='text' ? quickTrack.text.trim() : '',
+        sync_mode:quickTrack.sync_mode,
+        audio_trim_start_ms:Number(quickTrack.audio_trim_start_ms || 0),
+        audio_trim_end_ms:quickTrack.audio_trim_end_ms === '' ? null : quickTrack.audio_trim_end_ms,
+      };
+      const saved = existing ? await studioApi.updateScene(existing.id,payload) : await studioApi.createScene(payload);
+      if (audioId) await studioApi.render(saved.data.id);
+      await refresh();
+      setDialog(null);setQuickTrack(null);
+    } catch (e) {
+      setQuickError(apiError(e));
+      await refresh().catch(()=>{});
+    } finally {setQuickSaving(false);}
+  };
   const chosenScene = scenes.find(s => s.id === synth.scene);
   const voiceLanguage = languages.find(l=>l.id===voiceForm.langue)?.code;
   const selectedLang = languages.find(l => l.code === synth.langue);
@@ -201,7 +293,7 @@ export default function Voice() {
         <div className="story-node-heading"><strong>{group.story.title}</strong><Link className="btn btn-outline" to={`/previsualisation?story=${encodeURIComponent(group.story.id)}`}><Play size={14}/> Lire le parcours complet</Link></div>
         {group.items.map(n => <div className="story-node-row" key={n.id}>
           <div><strong>{n.titre_fr}</strong><small>{n.type === 'DECISION' ? 'DÉCISION : choix du joueur, sans vidéo' : n.type === 'ENDING' ? 'FIN' : 'SCÈNE'}</small></div>
-          {n.type !== 'DECISION' && ['fr','mg'].map(code => {const sc=nodeScene(n.id,code); return <div className="story-node-language" key={code}><span>{code.toUpperCase()} : {sc?.audio ? sc.statut : code==='fr'?'Narration à générer':'Facultatif'}</span><button className="btn btn-outline" disabled={busy} onClick={() => {setTrackOnly(true);sc ? editScene(sc,true) : openNodeForLanguage(n, code)}}>{sc?.audio ? 'Modifier' : 'Associer'} audio {code.toUpperCase()}</button></div>})}
+          {n.type !== 'DECISION' && ['fr','mg'].map(code => {const sc=nodeScene(n.id,code);const status=trackStatus(n.id,code);return <div className="story-node-language" key={code}><span className={`track-status track-status-${status.state}`} title={status.label}>{code.toUpperCase()} : {status.label}</span><button className="btn btn-outline" disabled={busy} onClick={() => openQuickTrack(n,code)}>{sc?.audio || sc?.narration_texte ? 'Modifier' : 'Associer'} audio {code.toUpperCase()}</button></div>})}
           {n.type !== 'DECISION'&&<div className="story-node-actions"><button className="btn btn-outline" disabled={busy} onClick={()=>{setTrackOnly(false);const sc=nodeScene(n.id,'fr');sc?editScene(sc):openNodeForLanguage(n,'fr')}}>Paramètres</button><button className="btn btn-outline" disabled={!nodeScene(n.id,'fr')} onClick={()=>{const sc=nodeScene(n.id,'fr');if(sc)showScenePreview(sc.id,'fr')}}>Voir · FR</button></div>}
         </div>)}
       </div>)}
@@ -209,7 +301,7 @@ export default function Voice() {
       <span className="muted">La narration française est obligatoire pour chaque scène et fin. La piste malagasy est facultative. Sans fichier FR, le texte de la scène est synthétisé avec une voix configurée. Un nœud narratif peut avoir deux montages distincts (FR et MG). « DRAFT » signifie que le média n'est pas encore finalisé ; « READY » indique un rendu prêt. Les décisions ne nécessitent pas de média.</span>
     </div>}
     {activeStudioTab==='renders'&&<div className="resource-list voice-tab-content">
-      {scenes.map(s=><div className="resource-list-row studio-preview-row" id={`scene-${s.id}`} key={s.id}><span className="resource-list-icon"><AudioLines size={18}/></span><span className="resource-list-main"><strong>{nodes.find(n=>n.id===s.noeud)?.titre_fr||s.noeud}</strong><small>{s.mode} · {languages.find(l=>l.id===s.langue)?.code||s.langue} · {s.statut}</small></span><div className="table-actions"><button className="btn btn-outline" disabled={busy} onClick={()=>editScene(s)}>Modifier</button>
+      {scenes.map(s=><div className="resource-list-row studio-preview-row" id={`scene-${s.id}`} key={s.id}><span className="resource-list-icon"><AudioLines size={18}/></span><span className="resource-list-main"><strong>{nodes.find(n=>n.id===s.noeud)?.titre_fr||s.noeud}</strong><small>{s.mode} · {languages.find(l=>l.id===s.langue)?.code||s.langue} · {trackStatus(s.noeud,languages.find(l=>l.id===s.langue)?.code||'fr').label}</small></span><div className="table-actions"><button className="btn btn-outline" disabled={busy} onClick={()=>editScene(s)}>Modifier</button>
       {s.audio&&!mediaById(s.audio)?.droits_confirmes&&<button className="btn btn-outline" disabled={busy} onClick={()=>{const licence=window.prompt('Licence vérifiée de cette voix générée :');if(licence?.trim())run(async()=>{await studioApi.confirmRights(s.audio,licence.trim());await studioApi.render(s.id)})}}>Valider les droits de la voix</button>}
       <button disabled={s.mode==='TEXT_ONLY'||busy} className="btn btn-outline" onClick={()=>render(s.id)}>{s.mode==='AUDIO_ONLY'?'Finaliser la voix':'Assembler'}</button>
       <button type="button" className="btn btn-outline" onClick={()=>{setPreviewLang(languages.find(l=>l.id===s.langue)?.code||'fr');setPreviewSceneId(p=>p===s.id?null:s.id)}}>{previewSceneId===s.id?'Fermer l’aperçu':'Écouter / Voir'}</button></div>
@@ -235,6 +327,31 @@ export default function Voice() {
     {activeStudioTab==='jobs'&&<div className="resource-list voice-tab-content">{jobs.slice(0,20).map(j=><div className="resource-list-row" key={j.id}><span className="resource-list-icon"><WandSparkles size={18}/></span><span className="resource-list-main"><strong>{j.type} · {j.statut}</strong><small>{j.code_erreur||'Traitement du studio'} · {j.created_at?.slice(0,16)}</small></span>{j.resultat_url&&<span className="muted">Fichier prêt dans la médiathèque</span>}</div>)}</div>}
       </div>
     </div>
+    {dialog==='track' && quickTrack && <Dialog title={`Piste ${quickTrack.language.toUpperCase()} · ${nodes.find(n=>String(n.id)===String(quickTrack.nodeId))?.titre_fr || 'Scène'}`} className="dialog-track-quick" onClose={()=>{if(!quickSaving)setDialog(null)}}>
+      <form className="form-stack quick-track-form" onSubmit={saveQuickTrack}>
+        {(() => {const status=trackStatus(quickTrack.nodeId,quickTrack.language);return <div className={`track-status track-status-${status.state}`} role="status">Traitement : {status.label}</div>})()}
+        {quickTrack.language==='fr'&&<Field label="Source de la narration"><select value={quickSource} onChange={e=>{setQuickSource(e.target.value);setQuickFile(null);setQuickError('')}}><option value="text">Texte à lire par TTS</option><option value="file">Voix enregistrée (fichier)</option></select></Field>}
+        {quickSource==='file' ? <>
+          {quickTrack.audio && <div className="soft-note">Piste actuellement associée : <strong>{mediaById(quickTrack.audio)?.titre || 'Fichier audio existant'}</strong>. Conserve-la ou remplace-la ci-dessous.</div>}
+          <Field label={quickTrack.audio?'Remplacer la piste audio (facultatif)':'Fichier audio (WAV, MP3, M4A ou OGG)'}><input type="file" accept=".wav,.mp3,.m4a,.ogg,audio/*" onChange={e=>{setQuickFile(e.target.files?.[0]||null);setQuickRights(false);if(e.target.files?.[0])setQuickTrack(p=>({...p,audio_trim_start_ms:0,audio_trim_end_ms:null}))}} /></Field>
+          {quickFile && <label className="quick-track-rights"><input type="checkbox" checked={quickRights} onChange={e=>setQuickRights(e.target.checked)}/> Je confirme disposer des droits nécessaires pour diffuser cet audio.</label>}
+          <small className="muted">Aucun fournisseur TTS à configurer : le fichier sera associé directement et finalisé par le worker FFmpeg.</small>
+        </> : <>
+          <Field label="Texte français à lire"><textarea rows={4} maxLength={2500} value={quickTrack.text} onChange={e=>setQuickTrack(p=>({...p,text:e.target.value}))} /></Field>
+          <small className="muted">{voices.find(v=>v.actif && String(v.id)===String(quickTrack.voice))?.nom || voices.find(v=>v.actif && String(v.langue)===String(languages.find(l=>l.code==='fr')?.id))?.nom || 'Aucune voix TTS française configurée'} · la voix active sera utilisée automatiquement.</small>
+          {!voices.some(v=>v.actif&&String(v.langue)===String(languages.find(l=>l.code==='fr')?.id)) && <p className="form-hint">Le texte pourra être enregistré, mais la piste FR ne pourra pas être finalisée avant de configurer une voix ou d'importer un fichier.</p>}
+        </>}
+        <Field label="Synchronisation de la longueur"><select value={quickTrack.sync_mode} onChange={e=>setQuickTrack(p=>({...p,sync_mode:e.target.value,audio_trim_start_ms:0,audio_trim_end_ms:null}))}>
+          <option value="FREEZE_LAST">Durée originale · figer la dernière image (recommandé)</option><option value="SPEED">Adapter la vitesse de la voix à la vidéo</option><option value="TRIM">Découper un segment audio</option><option value="TRIM_SPEED">Découper puis adapter la vitesse</option>
+        </select></Field>
+        {['TRIM','TRIM_SPEED'].includes(quickTrack.sync_mode)&&<div className="form-two">
+          <Field label="Début (secondes)"><input type="number" min="0" step="0.01" value={Number(quickTrack.audio_trim_start_ms||0)/1000} onChange={e=>setQuickTrack(p=>({...p,audio_trim_start_ms:Math.round(Number(e.target.value)*1000)}))}/></Field>
+          <Field label="Fin (secondes ; vide = fin de la piste)"><input type="number" min="0" step="0.01" value={quickTrack.audio_trim_end_ms===null?'':Number(quickTrack.audio_trim_end_ms)/1000} onChange={e=>setQuickTrack(p=>({...p,audio_trim_end_ms:e.target.value===''?null:Math.round(Number(e.target.value)*1000)}))}/></Field>
+        </div>}
+        {quickError&&<p role="alert" className="api-error">{quickError}</p>}
+        <div className="form-actions"><button type="button" className="btn btn-outline" disabled={quickSaving} onClick={()=>setDialog(null)}>Annuler</button><button type="submit" className="btn btn-primary" disabled={quickSaving||busy||(quickSource==='file'&&!quickTrack.audio&&!quickFile)||(quickFile&&!quickRights)}>{quickSaving?'Enregistrement / lancement…':'Enregistrer la piste'}</button></div>
+      </form>
+    </Dialog>}
     {dialog==='voice'&&<Dialog title="Configurer une voix TTS" onClose={()=>setDialog(null)}><form className="form-stack" onSubmit={createVoice}>
       <Field label="Langue"><select required value={voiceForm.langue} onChange={e=>{setVoiceForm(p=>({...p,langue:e.target.value,voice_id:''}));setCatalog([])}}><option value="">Choisir une langue</option>{languages.map(l=><option key={l.id} value={l.id}>{l.nom_fr||l.code}</option>)}</select></Field>
       <Field label="Fournisseur"><select value={voiceForm.provider} onChange={e=>{setVoiceForm(p=>({...p,provider:e.target.value,model_id:'',voice_id:''}));setCatalog([])}}><option value="GOOGLE_CLOUD">Google Cloud TTS (quota limité)</option><option value="ELEVENLABS">ElevenLabs (plan gratuit limité)</option><option value="GEMINI">Gemini</option></select></Field>

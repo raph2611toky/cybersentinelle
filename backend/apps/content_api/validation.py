@@ -28,7 +28,9 @@ def validate_story_graph(story, *, require_complete=True):
         if n.type == TypeNoeud.ENDING:
             if (decisions != story.decisions_attendues if require_complete else decisions > story.decisions_attendues):
                 raise ValidationError(
-                    f"{story.slug}: parcours avec {decisions} décisions, attendu {story.decisions_attendues}"
+                    (f"{story.slug}: ce chemin comporte {decisions} décision(s), "
+                     f"mais le Tantara exige {story.decisions_attendues} décision(s) par chemin. "
+                     "Modifie « Décisions par parcours » ou complète toutes les branches du graphe.")
                 )
             endings.add(key)
             return

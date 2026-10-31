@@ -14,6 +14,8 @@ export default function ScenePlayback({ video = '', audio = '', image = '', embe
   const audioRef = useRef(null);
   const completed = useRef({ video: false, audio: false, notified: false });
   const sourceHistory = useRef(null);
+  const switchingTrack = useRef(false);
+  const lastPlaybackTime = useRef(0);
   const [problem, setProblem] = useState('');
   const [videoFinished, setVideoFinished] = useState(false);
   const [playing, setPlaying] = useState(false);
@@ -28,13 +30,14 @@ export default function ScenePlayback({ video = '', audio = '', image = '', embe
     const switchTrack = previous && previous.video === video && previous.audio !== audio;
     const videoElement = videoRef.current;
     const audioElement = audioRef.current;
-    const position = videoElement?.currentTime || 0;
-    const wasPlaying = Boolean(videoElement && !videoElement.paused && !videoElement.ended);
+    const position = videoElement && !videoElement.ended ? videoElement.currentTime : lastPlaybackTime.current || 0;
+    const wasPlaying = Boolean((videoElement && !videoElement.paused && !videoElement.ended) || playing);
     sourceHistory.current = {video,audio};
-    completed.current = { video: !video, audio: !audioTrack, notified: false };
+    completed.current = { video: !video || Boolean(videoElement?.ended), audio: !audioTrack, notified: false };
     setProblem('');
-    if (!switchTrack) { setPlaying(false); setVideoFinished(false); }
-    if (!switchTrack || !audioElement || !audio) return undefined;
+    switchingTrack.current = Boolean(switchTrack);
+    if (!switchTrack) {lastPlaybackTime.current=0;setPlaying(false); setVideoFinished(false);}
+    if (!switchTrack || !audioElement || !audio) {switchingTrack.current=false;return undefined;}
 
     let active = true;
     const resumeAudio = () => {
@@ -46,6 +49,7 @@ export default function ScenePlayback({ video = '', audio = '', image = '', embe
       if (wasPlaying && !audioElement.ended) {
         audioElement.play().catch(() => setProblem('Nouvelle piste sélectionnée : clique sur « Lire avec le son » pour autoriser la narration.'));
       }
+      switchingTrack.current=false;
     };
     audioElement.addEventListener('loadedmetadata', resumeAudio, {once:true});
     if (audioElement.readyState >= 1) resumeAudio();
@@ -114,6 +118,7 @@ export default function ScenePlayback({ video = '', audio = '', image = '', embe
   };
 
   const onAudioPause = () => {
+    if(switchingTrack.current)return;
     if (paired && !audioRef.current?.ended && videoRef.current && !videoRef.current.ended) videoRef.current.pause();
     setPlaying(false);
   };
@@ -137,7 +142,7 @@ export default function ScenePlayback({ video = '', audio = '', image = '', embe
     {showVideo && <video
       ref={videoRef} src={video} controls playsInline preload="metadata"
       muted={paired} onPlay={onVideoPlay} onPause={onVideoPause}
-      onSeeking={onVideoSeek} onEnded={onVideoEnded}
+      onSeeking={onVideoSeek} onTimeUpdate={e=>{lastPlaybackTime.current=e.currentTarget.currentTime;}} onEnded={onVideoEnded}
       onError={() => setProblem('Impossible de charger la vidéo. Vérifie les droits de lecture et le fichier.')}
       aria-label={`Vidéo de ${title}`}
     />}
@@ -145,7 +150,7 @@ export default function ScenePlayback({ video = '', audio = '', image = '', embe
     {!showVideo && !showImage && <div className="story-preview-placeholder"><Film size={36}/><span>{audio ? 'Scène avec narration audio' : 'Aucun média disponible pour cette scène'}</span></div>}
     {audioTrack && <div className="scene-playback-audio">
       <span><Volume2 size={15}/> {paired ? 'Voix de la scène · synchronisée' : 'Voix de la scène'}</span>
-      <audio ref={audioRef} src={audio} controls preload="metadata" onPlay={onAudioPlay} onPause={onAudioPause} onEnded={onAudioEnded}
+      <audio ref={audioRef} src={audio} controls preload="metadata" onPlay={onAudioPlay} onPause={onAudioPause} onTimeUpdate={e=>{if(!video || videoRef.current?.ended)lastPlaybackTime.current=e.currentTarget.currentTime;}} onEnded={onAudioEnded}
         onError={() => setProblem('Impossible de charger la piste audio. Vérifie le média dans la médiathèque.')} />
     </div>}
     {showVideo && embeddedAudio && <div className="scene-playback-info"><Volume2 size={14}/> Voix intégrée à la vidéo finale</div>}
